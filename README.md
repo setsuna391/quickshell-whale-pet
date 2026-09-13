@@ -1,7 +1,8 @@
 # DSH 小鲸鱼桌面宠物(quickshell 版)
 
 由 [DeepSeek-Balance-Whale-Widget](https://github.com/MeteorNOX/DeepSeek-Balance-Whale-Widget)
-移植到 Linux Wayland(niri)桌面,基于 quickshell 的 layer-shell 实现,常驻置顶悬浮。
+(MIT License,© 2026 MeteorNOX)移植到 Linux Wayland(niri)桌面 —— 本项目是其桌面宠物衍生版,
+基于 quickshell 的 layer-shell 实现,常驻置顶悬浮。
 
 <table>
   <tr>
@@ -122,3 +123,8 @@ quickshell-pet/
 ├── README.md
 └── assets/          # 复制自原插件:立绘 / rua.gif / 两组音效
 ```
+
+## 致谢
+
+- 🐋 立绘、rua.gif、音效素材与部分台词均来自 [DeepSeek-Balance-Whale-Widget](https://github.com/MeteorNOX/DeepSeek-Balance-Whale-Widget)(© 2026 MeteorNOX,MIT License),本项目为其衍生作品,感谢原作者!
+- 本项目同样以 [MIT License](LICENSE) 开源;assets/ 目录内容的版权归属见 LICENSE 中的 Third-party notices。
