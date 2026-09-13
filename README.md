@@ -3,6 +3,14 @@
 由 [DeepSeek-Balance-Whale-Widget](https://github.com/MeteorNOX/DeepSeek-Balance-Whale-Widget)
 移植到 Linux Wayland(niri)桌面,基于 quickshell 的 layer-shell 实现,常驻置顶悬浮。
 
+<table>
+  <tr>
+    <td><img src="docs/screenshot-bubble.png" width="280"></td>
+    <td><img src="docs/screenshot-chat.png" width="290"></td>
+  </tr>
+  <tr><td align="center">左键 · 随机台词 / 余额</td><td align="center">右键 · opencode 聊天</td></tr>
+</table>
+
 ## 运行
 
 ```sh
