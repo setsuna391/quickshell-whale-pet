@@ -431,7 +431,7 @@ ShellRoot {
                     '[ -n "$OSID" ] && A="$A -s $OSID"; ' +
                     '[ -n "$OMODEL" ] && A="$A -m $OMODEL"; ' +
                     '[ -n "$OAGENT" ] && A="$A --agent $OAGENT"; ' +
-                    'timeout 180 "$OBIN" run --format json $A --dir "$ODIR" "$1" < /dev/null',
+                    'timeout 45 "$OBIN" run --format json $A --dir "$ODIR" "$1" < /dev/null',
                     "sh", m];
                 chatProc.running = false;
                 chatProc.running = true;
@@ -513,6 +513,9 @@ ShellRoot {
                         if (typeof j.ocSession === "string") win.ocSession = j.ocSession;
                         if (typeof j.snapRight === "boolean") win.snapRight = j.snapRight;
                         win.placeRight = win.snapRight;
+                        // 存档位置可能来自其他分辨率/缩放会话而超出屏幕,这里强制回收
+                        if (win.snapRight) win.petX = win.screenW - win.width;
+                        else if (win.mirrored) win.petX = 0;
                     } catch (e) {}
                 }
             }
@@ -528,41 +531,43 @@ ShellRoot {
             }
         }
 
-        // ---------- 气泡背景组件(圆角矩形 + 曲线尾巴) ----------
-        component BubbleBg: Canvas {
+        // ---------- 思考泡泡背景组件(椭圆身 + 渐远圆点链) ----------
+        component BubbleBg: Item {
             id: bubbleBg
             property real tailX: width / 2
-            property real tailH: 12
+            property color fillColor: "#fdfdff"
+            property color borderColor: "#4a5db4"
             antialiasing: true
-            onTailXChanged: requestPaint()
-            onWidthChanged: requestPaint()
-            onHeightChanged: requestPaint()
-            onPaint: {
-                const ctx = getContext("2d");
-                ctx.reset();
-                const r = 14, w = width, h = height - tailH, tx = tailX, tw = 20;
-                ctx.beginPath();
-                ctx.moveTo(tx - tw / 2, h - 1);
-                ctx.lineTo(r + 1, h - 1);
-                ctx.arcTo(1, h - 1, 1, h - 1 - r, r);
-                ctx.lineTo(1, r + 1);
-                ctx.arcTo(1, 1, r + 1, 1, r);
-                ctx.lineTo(w - r - 1, 1);
-                ctx.arcTo(w - 1, 1, w - 1, r + 1, r);
-                ctx.lineTo(w - 1, h - 1 - r);
-                ctx.arcTo(w - 1, h - 1, w - r - 1, h - 1, r);
-                ctx.lineTo(tx + tw / 2, h - 1);
-                ctx.quadraticCurveTo(tx + tw * 0.22, h + tailH * 0.5, tx, h + tailH);
-                ctx.quadraticCurveTo(tx - tw * 0.22, h + tailH * 0.5, tx - tw / 2, h - 1);
-                ctx.closePath();
-                const grad = ctx.createLinearGradient(0, 0, 0, h);
-                grad.addColorStop(0, "#ffffff");
-                grad.addColorStop(1, "#eef1ff");
-                ctx.fillStyle = grad;
-                ctx.fill();
-                ctx.lineWidth = 2;
-                ctx.strokeStyle = "#5b6ee1";
-                ctx.stroke();
+
+            // 泡泡链:从大圆到小圆,连向角色头顶
+            Repeater {
+                model: 3
+                Rectangle {
+                    required property int index
+                    readonly property real baseY: bubbleBg.height - 8
+                    readonly property int dir: bubbleBg.tailX > bubbleBg.width / 2 ? -1 : 1
+                    width: 15 - index * 3.5
+                    height: width
+                    radius: width / 2
+                    color: bubbleBg.fillColor
+                    border.color: bubbleBg.borderColor
+                    border.width: 2
+                    x: bubbleBg.tailX - width / 2 + dir * index * 7
+                    y: baseY + index * 9
+                    z: 1
+                }
+            }
+
+            // 椭圆泡泡主体
+            Rectangle {
+                anchors.top: parent.top
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: parent.width
+                height: parent.height - 34
+                radius: Math.min(width, height) * 0.42
+                color: bubbleBg.fillColor
+                border.color: bubbleBg.borderColor
+                border.width: 2.5
             }
         }
 
@@ -668,7 +673,7 @@ ShellRoot {
             x: win.edgePad
             y: whaleHit.y - height - 6
             width: win.width - win.edgePad * 2
-            height: (win.bubbleGif ? 150 : bubbleCol.height + 26) + 12
+            height: (win.bubbleGif ? 160 : bubbleCol.height + 30) + 34
             Behavior on opacity { NumberAnimation { duration: 150 } }
             onVisibleChanged: opacity = visible ? 1 : 0
 
@@ -701,7 +706,7 @@ ShellRoot {
             Column {
                 id: bubbleCol
                 visible: !win.bubbleGif
-                x: 14; y: 13
+                x: 16; y: 16
                 width: parent.width - 28
                 spacing: 6
 
@@ -730,12 +735,15 @@ ShellRoot {
             x: win.whaleRight ? win.edgePad : win.width - win.edgePad - win.chatW
             y: whaleHit.y - height - 6
             width: win.chatW
-            height: 206
+            height: 240
             Behavior on opacity { NumberAnimation { duration: 150 } }
             onVisibleChanged: opacity = visible ? 1 : 0
 
             BubbleBg {
-                anchors.fill: parent
+                anchors.top: parent.top
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: parent.width
+                height: parent.height - 34
                 tailX: win.whaleRight ? parent.width - 34 : 34
             }
 
