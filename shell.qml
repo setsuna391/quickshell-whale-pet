@@ -33,6 +33,7 @@ ShellRoot {
         implicitHeight: whaleH + whaleTop
 
         color: "transparent"
+        visible: win.bootReady                       // 配置+位置就绪后才出现,首帧即正确大小
         anchors { bottom: true; left: true }
         exclusionMode: ExclusionMode.Ignore
         WlrLayershell.layer: WlrLayer.Top
@@ -74,6 +75,9 @@ ShellRoot {
         property string ocDir: ""
         property string ocSession: ""
         property bool snapRight: false               // 吸附在右边缘
+        property bool cfgReady: false                // 启动就绪门:配置已加载
+        property bool stateReady: false              // 启动就绪门:位置已加载
+        readonly property bool bootReady: cfgReady && stateReady
         property bool placeRight: false              // 鲸鱼停在窗口左缘还是右缘(仅静止时刻更新)
         readonly property real chatW: 320            // 聊天面板宽度
         property int chatDots: 0
@@ -232,6 +236,7 @@ ShellRoot {
 
         Component.onCompleted: {
             petX = clampX(win.screenW * 0.78 - win.width / 2);
+            configProc.running = true;   // 立即读配置,不等首轮轮询
             loadState.running = true;
             startBalanceCycle();
         }
@@ -284,6 +289,7 @@ ShellRoot {
                         win.defaultConfigWritten = true;
                         defaultConfigWriter.write();
                     }
+                    win.cfgReady = true;
                 }
             }
         }
@@ -291,6 +297,10 @@ ShellRoot {
         Timer {
             interval: 2000; running: true; repeat: true
             onTriggered: { configProc.running = false; configProc.running = true; }
+        }
+        Timer {
+            interval: 1500; running: true; repeat: false
+            onTriggered: { win.cfgReady = true; win.stateReady = true; } // 兜底放行
         }
         Process {
             id: defaultConfigWriter
@@ -517,6 +527,7 @@ ShellRoot {
                         if (win.snapRight) win.petX = win.screenW - win.width;
                         else if (win.mirrored) win.petX = 0;
                     } catch (e) {}
+                    win.stateReady = true;
                 }
             }
         }
