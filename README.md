@@ -12,7 +12,7 @@
     <td><img src="docs/screenshot-bubble.png" width="280"></td>
     <td><img src="docs/screenshot-chat.png" width="290"></td>
   </tr>
-  <tr><td align="center">左键 · 随机台词 / 余额</td><td align="center">右键 · opencode 聊天</td></tr>
+  <tr><td align="center">左键 · 随机台词气泡</td><td align="center">思考泡泡样式,右键看余额</td></tr>
 </table>
 
 ## 运行
@@ -31,10 +31,8 @@
 | --- | --- |
 | 左键点鲸鱼 | Q 弹 + 音效 + 随机台词气泡(含各家余额/峰谷提示,5 秒自动收起) |
 | 再点气泡 | 换一段随机台词 |
-| 右键鲸鱼 | 有气泡时先关气泡;否则**打开/关闭 opencode 聊天框**,回车发送,Esc 或再右键关闭 |
-| 双击鲸鱼 | 同右键,打开/关闭聊天框 |
+| 右键鲸鱼 | 峰谷时段 + 各家余额气泡(有气泡时先关闭) |
 | 拖拽 | 移动位置,靠近左/右边缘自动吸附;吸到左边整体水平镜像 |
-| 点击鲸鱼上方 | rua.gif 表情包仍会在随机台词气泡里出现 |
 
 ## 配置
 
@@ -55,41 +53,6 @@
 ```
 
 鲸鱼在屏幕上的位置(`state.json` 里的 `petX` / `mirrored`)由拖拽自动记忆,不用手动改。
-
-## 对接 opencode(默认聊天后端)
-
-鲸鱼的聊天默认走本机的 **opencode CLI**,用的就是你 opencode 里配置好的模型和凭据:
-
-```json
-"opencode": {
-  "enabled": true,       // 关闭则退回下面的通用 ai 接口
-  "bin": "opencode",
-  "model": "",           // 可选,如 "deepseek/deepseek-chat",留空用 opencode 默认
-  "agent": "",           // 可选,如 "plan"
-  "dir": ""              // 会话工作目录,留空 = 家目录
-}
-```
-
-- 实现方式:`opencode run --format json`,回复从 JSON 事件流里解析
-- **会话连续**:自动捕获 sessionID 并存在 `state.json`,重启后接着聊;想重置对话就 `run.sh restart` 前删掉 state.json 里的 `ocSession`
-- 给鲸鱼娘立人设:在 `dir` 指向的目录放 `AGENTS.md` 写人设即可
-- ⚠️ 她是真 agent,复杂问题可能触发工具调用,回复会慢;想纯聊天可以在 opencode 里建一个无工具的 agent 填到 `agent`
-
-## AI 对话(备用,通用 OpenAI 兼容接口)
-
-`config.json` 的 `ai` 段填一个 **OpenAI 兼容接口**即可(DeepSeek / Kimi / 硅基流动 / OpenRouter / 各种中转都行):
-
-```json
-"ai": {
-  "baseUrl": "https://api.deepseek.com",
-  "apiKey": "sk-...",         // 或写到 ~/.config/dsh-pet/ai_key 文件
-  "model": "deepseek-chat",
-  "system": "你是 DeepSeek 小鲸鱼娘...",   // 人设,随意改
-  "maxHistory": 10            // 记住的对话轮数
-}
-```
-
-双击鲸鱼 → 输入框打字 → 回车发送,回复显示在上方气泡里。带上下文连续聊天,重启后清空。
 
 ## 多家余额(可选)
 
