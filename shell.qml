@@ -1,9 +1,10 @@
 // DSH 小鲸鱼桌面宠物 —— quickshell 版
 // 参考 DeepSeek-Balance-Whale-Widget 移植到 niri/Wayland
-// 运行: ~/quickshell-pet/run.sh
+// 运行: ~/Documents/project/quickshell-whale-pet/run.sh
 // 配置: ~/.config/dsh-pet/config.json(保存后即时生效,无需重启)
 
 import QtQuick
+import QtQuick.Shapes
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
@@ -23,13 +24,30 @@ ShellRoot {
         property bool idleTalk: true         // 发呆自言自语
         property int idleTalkMinutes: 5      // 自言自语间隔(分钟)
         property real idleTalkChance: 0.4    // 每次触发说话的概率
+        property real volume: 1.0            // 音效音量 0 – 1
+        property string model: "DSniang1.png" // 角色立绘(assets 下文件名,或绝对路径)
+        property real bubbleScale: 1.3       // 气泡大小(相对鲸鱼宽度,0.8 – 2.5)
+
+        // ---- 气泡(复刻上游 SVG 模板) ----
+        readonly property color bubbleFill: "#ffffff"
+        readonly property color bubbleStroke: "#203170"
+        readonly property color bubbleText: "#536ba9"
+        readonly property color bubbleMuted: "#9fb0d9"
+        readonly property real bubbleStrokeW: 18
+        // 上游 1026x700 画布中的图形 path (原样)
+        readonly property string bubblePathMain: "M 827 248 A 373 232 0 1 0 81 246 A 373 232 0 0 0 301 465 A 57 32 10 0 0 413 484 A 373 232 0 0 0 827 248 Z"
+        readonly property string bubblePathDot1: "M 314.5 561 a 37.5 26 0 1 0 75 0 a 37.5 26 0 1 0 -75 0 Z"
+        readonly property string bubblePathDot2: "M 417.5 646 a 24.5 18 0 1 0 49 0 a 24.5 18 0 1 0 -49 0 Z"
 
         // ---- 窗口几何 ----
         readonly property int baseW: 170
         readonly property int whaleW: Math.round(baseW * petScale)
         readonly property int whaleH: Math.round(baseW * petScale)
-        readonly property int whaleTop: 216            // 上方留给气泡
-        implicitWidth: whaleW + edgePad * 2
+        // 气泡相对"鲸鱼宽度"的放大系数(窗口加宽让气泡向屏幕内侧生长,鲸鱼仍贴边)
+        readonly property real bubbleArtScale: (whaleW + edgePad * 2) * bubbleScale / 790
+        readonly property int bubbleArtH: Math.round(690 * bubbleArtScale)
+        readonly property int whaleTop: Math.max(216, bubbleArtH + 16)   // 上方留给气泡
+        implicitWidth: Math.round((whaleW + edgePad * 2) * bubbleScale)
         implicitHeight: whaleH + whaleTop
 
         color: "transparent"
@@ -57,7 +75,10 @@ ShellRoot {
         property var balanceSources: [{ name: "DeepSeek", type: "deepseek", apiKey: "" }]
         property var balanceResults: [{ name: "DeepSeek", amount: "--", currency: "", ok: false }]
         property int balanceCursor: 0
-        // ---- AI 对话 ----
+        property string balanceSig: ""
+        property var balSrc: null      // 当前请求对应的余额源
+        property int balIdx: -1        // 当前请求对应的结果槽位
+        // ---- 吸附 / 启动状态 ----
         property bool snapRight: false               // 吸附在右边缘
         property bool cfgReady: false                // 启动就绪门:配置已加载
         property bool stateReady: false              // 启动就绪门:位置已加载
@@ -98,11 +119,11 @@ ShellRoot {
 
         function group1() {
             const peak = win.isPeak();
-            const lines = [{ t: (peak ? "高峰时段" : "空闲时段") + "(DeepSeek)", s: "P", c: peak ? "#e0433f" : "#2fa24c" }];
+            const lines = [{ t: (peak ? "梁文峰" : "梁文谷") + "(DeepSeek)", s: "P", c: peak ? "#e0433f" : "#2fa24c" }];
             let any = false;
             for (const r of win.balanceResults) {
-                if (r.ok) { lines.push({ t: r.name + " " + r.amount + " " + r.currency, s: "B", c: "" }); any = true; }
-                else lines.push({ t: r.name + " --", s: "A", c: "#9aa3c0" });
+                if (r.ok) { lines.push({ t: r.name + " " + r.amount + "\u00A0" + r.currency, s: "B", c: "" }); any = true; }
+                else lines.push({ t: r.name + " --", s: "A", c: win.bubbleMuted });
             }
             if (!any) {
                 return [{ t: pickOne(["鲸鱼娘上岗啦~", "今天也要加油鸭！不对，加油鲸！", "余额？我看看...看不了啦，没给我钥匙~", "在 config.json 的 balance 里填 key,我就能报余额啦~"]), s: "A", c: "" }];
@@ -148,6 +169,9 @@ ShellRoot {
                     "DeepSleep...",
                     "坏了...用户彻底怒了！",
                     "在 niri 上摸鱼真开心~",
+                    "我...我...我也要挣钱吗？",
+                    "魏文杰凑凑的",
+                    "严文杰香香的",
                     "被拖来拖去也...也可以哦...",
                     "别看我圆,我是流线型身材!",
                     "今天的我,也在深海努力漂浮~",
@@ -263,7 +287,14 @@ ShellRoot {
         // ---------- 音效 ----------
         function playSfx(file) {
             if (!win.soundOn) return;
-            Quickshell.execDetached(["paplay", win.assetDir + file]);
+            const v = Math.max(0, Math.min(1, win.volume));
+            // pw-play(pipewire) 优先, ffplay 兜底, paplay 兼容旧环境
+            Quickshell.execDetached(["sh", "-c",
+                'f="$1"; v="$2"; pct="$3"; pa="$4"; ' +
+                'command -v pw-play >/dev/null && exec pw-play --volume "$v" "$f"; ' +
+                'command -v ffplay >/dev/null && exec ffplay -nodisp -autoexit -loglevel quiet -volume "$pct" "$f"; ' +
+                'command -v paplay >/dev/null && exec paplay --volume "$pa" "$f"',
+                "sh", win.assetDir + file, v.toFixed(2), String(Math.round(v * 100)), String(Math.round(v * 65536))]);
         }
         function playPress() {
             playSfx(win.soundSet === "duck" ? "Ya1.mp3" : "D1.mp3");
@@ -276,7 +307,7 @@ ShellRoot {
             petX = clampX(win.screenW * 0.78 - win.width / 2);
             configProc.running = true;   // 立即读配置,不等首轮轮询
             loadState.running = true;
-            startBalanceCycle();
+            // 余额轮询由 applyConfig 在读到配置后启动(避免此处空 key 的空转与竞态)
         }
 
         // ---------- 配置文件(每 2 秒轮询,改完自动生效) ----------
@@ -291,6 +322,9 @@ ShellRoot {
             if (typeof j.idleTalk === "boolean") idleTalk = j.idleTalk;
             if (typeof j.idleTalkMinutes === "number") idleTalkMinutes = Math.max(1, j.idleTalkMinutes);
             if (typeof j.idleTalkChance === "number") idleTalkChance = Math.max(0, Math.min(1, j.idleTalkChance));
+            if (typeof j.volume === "number") volume = Math.max(0, Math.min(1, j.volume));
+            if (typeof j.model === "string" && j.model.length > 0) model = j.model;
+            if (typeof j.bubbleScale === "number") bubbleScale = Math.max(0.8, Math.min(2.5, j.bubbleScale));
             let srcs = [];
             if (Array.isArray(j.balance)) {
                 for (const b of j.balance) {
@@ -300,8 +334,12 @@ ShellRoot {
                 }
             }
             if (srcs.length === 0) srcs = [{ name: "DeepSeek", type: "deepseek", apiKey: "" }]; // 兼容旧 api_key 文件
-            balanceSources = srcs;
-            startBalanceCycle();
+            const sig = JSON.stringify(srcs);
+            if (sig !== win.balanceSig) {   // 只在余额源真正变化时重开轮询,避免每次配置轮询都清空重拉
+                win.balanceSig = sig;
+                balanceSources = srcs;
+                startBalanceCycle();
+            }
         }
         Process {
             id: configProc
@@ -335,7 +373,8 @@ ShellRoot {
                         scale: win.petScale, sound: win.soundOn, soundSet: win.soundSet,
                         edgePad: win.edgePad, snapZone: win.snapZone,
                         idleTalk: win.idleTalk, idleTalkMinutes: win.idleTalkMinutes,
-                        idleTalkChance: win.idleTalkChance })];
+                        idleTalkChance: win.idleTalkChance,
+                        volume: win.volume, model: win.model, bubbleScale: win.bubbleScale })];
                 running = false;
                 running = true;
             }
@@ -369,19 +408,21 @@ ShellRoot {
             const src = balanceSources[balanceCursor];
             let script = "";
             if (src.type === "deepseek") {
-                script = 'KEY="$PKEY"; [ -z "$KEY" ] && KEY=$(cat "$HOME/.config/dsh-pet/api_key" 2>/dev/null); ' +
+                script = 'KEY="$1"; [ -z "$KEY" ] && KEY="$(cat "$HOME/.config/dsh-pet/api_key" 2>/dev/null)"; ' +
                          '[ -z "$KEY" ] && KEY="$DEEPSEEK_API_KEY"; ' +
                          '[ -n "$KEY" ] && curl -s --max-time 8 https://api.deepseek.com/user/balance -H "Authorization: Bearer $KEY"';
             } else if (src.type === "openrouter") {
-                script = 'KEY="$PKEY"; [ -z "$KEY" ] && KEY="$OPENROUTER_API_KEY"; ' +
+                script = 'KEY="$1"; [ -z "$KEY" ] && KEY="$OPENROUTER_API_KEY"; ' +
                          '[ -n "$KEY" ] && curl -s --max-time 8 https://openrouter.ai/api/v1/credits -H "Authorization: Bearer $KEY"';
             } else if (src.type === "siliconflow") {
-                script = 'KEY="$PKEY"; [ -z "$KEY" ] && KEY="$SILICONFLOW_API_KEY"; ' +
+                script = 'KEY="$1"; [ -z "$KEY" ] && KEY="$SILICONFLOW_API_KEY"; ' +
                          '[ -n "$KEY" ] && curl -s --max-time 8 https://api.siliconflow.cn/v1/user/info -H "Authorization: Bearer $KEY"';
             }
             if (script === "") { balanceCursor++; balanceNextTimer.restart(); return; }
-            balanceProc.environment = { PKEY: src.apiKey };
-            balanceProc.command = ["sh", "-c", script];
+            // key 通过命令行参数传入(Quickshell 的 Process.environment 在本环境不生效)
+            balSrc = src;
+            balIdx = balanceCursor;
+            balanceProc.command = ["sh", "-c", script, "sh", src.apiKey];
             balanceProc.running = false;
             balanceProc.running = true;
         }
@@ -389,11 +430,13 @@ ShellRoot {
             id: balanceProc
             stdout: StdioCollector {
                 onStreamFinished: {
-                    const src = win.balanceSources[win.balanceCursor];
+                    const src = win.balSrc;
+                    const idx = win.balIdx;
+                    if (!src || idx < 0) return;
                     let amount = "--", cur = "", ok = false;
                     try {
                         const j = JSON.parse(text);
-                        if (src.type === "deepseek" && j.is_balance_available && j.balance_infos && j.balance_infos.length > 0) {
+                        if (src.type === "deepseek" && j.balance_infos && j.balance_infos.length > 0) {
                             amount = parseFloat(j.balance_infos[0].total_balance).toFixed(2);
                             cur = j.balance_infos[0].currency || "CNY"; ok = true;
                         } else if (src.type === "openrouter" && j.data && typeof j.data.total_credits === "number") {
@@ -405,9 +448,9 @@ ShellRoot {
                         }
                     } catch (e) {}
                     const res = win.balanceResults.slice();
-                    if (res[win.balanceCursor]) res[win.balanceCursor] = { name: src.name, amount: amount, currency: cur, ok: ok };
+                    if (res[idx]) res[idx] = { name: src.name, amount: amount, currency: cur, ok: ok };
                     win.balanceResults = res;
-                    win.balanceCursor++;
+                    win.balanceCursor = idx + 1;
                     balanceNextTimer.restart();
                 }
             }
@@ -418,7 +461,7 @@ ShellRoot {
             onTriggered: win.startBalanceCycle()
         }
 
-        // ---------- AI 对话 ----------
+        // ---------- 吸附 ----------
         function snapTo(side) {
             // 吸附到左/右缘:先补偿鲸鱼在窗口内的偏移变化(保持屏幕位置连续),再滑动到位
             const oldOff = placeRight ? width - whaleW - edgePad : edgePad;
@@ -444,7 +487,7 @@ ShellRoot {
                         const j = JSON.parse(text);
                         if (typeof j.petX === "number" && j.petX >= 0) {
                             // win.width 要等 Wayland 配置回包才更新,这里按目标缩放直接算宽度
-                            const targetW = Math.round(170 * win.petScale) + win.edgePad * 2;
+                            const targetW = Math.round((Math.round(170 * win.petScale) + win.edgePad * 2) * win.bubbleScale);
                             win.petX = Math.max(0, Math.min(win.screenW - targetW, Math.round(j.petX)));
                         }
                         if (typeof j.mirrored === "boolean") win.mirrored = j.mirrored;
@@ -469,50 +512,10 @@ ShellRoot {
             }
         }
 
-        // ---------- 思考泡泡背景组件(椭圆身 + 渐远圆点链) ----------
-        component BubbleBg: Item {
-            id: bubbleBg
-            property real tailX: width / 2
-            property color fillColor: "#fdfdff"
-            property color borderColor: "#4a5db4"
-            antialiasing: true
-
-            // 泡泡链:从大圆到小圆,连向角色头顶
-            Repeater {
-                model: 3
-                Rectangle {
-                    required property int index
-                    readonly property real baseY: bubbleBg.height - 8
-                    readonly property int dir: bubbleBg.tailX > bubbleBg.width / 2 ? -1 : 1
-                    width: 15 - index * 3.5
-                    height: width
-                    radius: width / 2
-                    color: bubbleBg.fillColor
-                    border.color: bubbleBg.borderColor
-                    border.width: 2
-                    x: bubbleBg.tailX - width / 2 + dir * index * 7
-                    y: baseY + index * 9
-                    z: 1
-                }
-            }
-
-            // 椭圆泡泡主体
-            Rectangle {
-                anchors.top: parent.top
-                anchors.horizontalCenter: parent.horizontalCenter
-                width: parent.width
-                height: parent.height - 34
-                radius: Math.min(width, height) * 0.42
-                color: bubbleBg.fillColor
-                border.color: bubbleBg.borderColor
-                border.width: 2.5
-            }
-        }
-
         // ---------- 鲸鱼本体 ----------
         Image {
             id: whaleImg
-            source: "assets/DSniang1.png"
+            source: win.model.charAt(0) === "/" ? ("file://" + win.model) : ("assets/" + win.model)
             x: win.placeRight ? win.width - win.whaleW - win.edgePad : win.edgePad
             anchors.bottom: parent.bottom
             anchors.bottomMargin: 0
@@ -600,28 +603,70 @@ ShellRoot {
             }
         }
 
-        // ---------- 气泡 ----------
+        // ---------- 气泡(复刻上游 SVG 模板: 白色 + #203170 粗描边) ----------
         Item {
             id: bubbleBox
-            visible: win.bubbleVisible
-            opacity: 0
-            x: win.edgePad
-            y: whaleHit.y - height - 6
-            width: win.width - win.edgePad * 2
-            height: (win.bubbleGif ? 160 : bubbleCol.height + 30) + 34
-            Behavior on opacity { NumberAnimation { duration: 150 } }
-            onVisibleChanged: opacity = visible ? 1 : 0
+            visible: win.bubbleVisible || opacity > 0.001
+            opacity: win.bubbleVisible ? 1 : 0
+            // 从鲸鱼一侧弹入, 关闭时轻微缩小淡出
+            scale: win.bubbleVisible ? 1 : 0.84
+            transformOrigin: win.placeRight ? Item.BottomRight : Item.BottomLeft
+            x: 0
+            y: whaleHit.y - height - 2
+            width: win.width
+            // 画布裁切区: 上游 1026x700 中取 x=60..850, y=0..690
+            readonly property real artScale: win.width / 790
+            readonly property real artW: 790 * artScale
+            readonly property real artH: 690 * artScale
+            height: artH
+            Behavior on opacity { NumberAnimation { duration: win.bubbleVisible ? 170 : 110; easing.type: Easing.OutCubic } }
+            Behavior on scale { NumberAnimation { duration: 300; easing.type: Easing.OutBack; easing.overshoot: 1.7 } }
 
-            // 柔和投影
-            Rectangle {
-                x: 3; y: 9
-                width: parent.width - 6; height: parent.height - 14
-                radius: 16
-                color: "#3b4a86"
-                opacity: 0.10
+            // 气泡图形(按原 path 精确缩放; 鲸鱼在右时水平镜像, 尾巴朝向鲸鱼)
+            Item {
+                id: bubbleArt
+                width: bubbleBox.artW
+                height: bubbleBox.artH
+                x: (bubbleBox.width - width) / 2
+                y: 0
+                transform: Scale {
+                    origin.x: bubbleArt.width / 2
+                    origin.y: 0
+                    xScale: win.placeRight ? -1 : 1
+                }
+
+                Shape {
+                    x: -60 * bubbleBox.artScale
+                    y: 0
+                    width: 1026
+                    height: 700
+                    scale: bubbleBox.artScale
+                    transformOrigin: Item.TopLeft
+                    preferredRendererType: Shape.CurveRenderer
+                    antialiasing: true
+
+                    ShapePath {
+                        fillColor: win.bubbleFill
+                        strokeColor: win.bubbleStroke
+                        strokeWidth: win.bubbleStrokeW
+                        capStyle: ShapePath.RoundCap
+                        joinStyle: ShapePath.RoundJoin
+                        PathSvg { path: win.bubblePathMain }
+                    }
+                    ShapePath {
+                        fillColor: win.bubbleFill
+                        strokeColor: win.bubbleStroke
+                        strokeWidth: win.bubbleStrokeW
+                        PathSvg { path: win.bubblePathDot1 }
+                    }
+                    ShapePath {
+                        fillColor: win.bubbleFill
+                        strokeColor: win.bubbleStroke
+                        strokeWidth: win.bubbleStrokeW
+                        PathSvg { path: win.bubblePathDot2 }
+                    }
+                }
             }
-
-            BubbleBg { anchors.fill: parent; tailX: win.placeRight ? parent.width - win.whaleW / 2 - win.edgePad : win.whaleW / 2 + win.edgePad }
 
             MouseArea {
                 anchors.fill: parent
@@ -632,31 +677,33 @@ ShellRoot {
             AnimatedImage {
                 visible: win.bubbleGif
                 source: "assets/rua.gif"
-                anchors.horizontalCenter: parent.horizontalCenter
-                anchors.top: parent.top
-                anchors.topMargin: 6
+                anchors.centerIn: parent
+                anchors.verticalCenterOffset: -bubbleBox.artH * 0.18
+                width: Math.min(bubbleBox.artW * 0.55, bubbleBox.artH * 0.55)
+                fillMode: Image.PreserveAspectFit
                 playing: visible
             }
 
             Column {
                 id: bubbleCol
                 visible: !win.bubbleGif
-                x: 16; y: 16
-                width: parent.width - 28
+                x: bubbleBox.width / 2 - width / 2
+                y: bubbleBox.artScale * 247 - height / 2
+                width: bubbleBox.artScale * 677
                 spacing: 6
 
                 Repeater {
-                    model: win.bubbleVisible && !win.bubbleGif ? win.bubbleLines : []
+                    model: win.bubbleGif ? [] : win.bubbleLines
                     Text {
                         required property var modelData
-                        renderType: Text.NativeRendering
                         width: bubbleCol.width
                         horizontalAlignment: Text.AlignHCenter
                         wrapMode: Text.Wrap
-                        text: modelData.s === "P" ? "● " + modelData.t : modelData.t
-                        color: modelData.c || "#3b3f52"
-                        font.pixelSize: modelData.s === "P" ? 16 : (modelData.s === "B" ? 19 : 15)
-                        font.bold: modelData.s === "P" || modelData.s === "B"
+                        text: modelData.s === "P" ? "●  " + modelData.t : modelData.t
+                        color: modelData.c || win.bubbleText
+                        font.family: "LXGW WenKai"
+                        font.weight: Font.Bold
+                        font.pixelSize: 19
                     }
                 }
             }
