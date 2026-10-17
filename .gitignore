@@ -1,1 +1,5 @@
 *.log
+/dist/
+windows/dist/
+windows/.cache/
+windows/node_modules/

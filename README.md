@@ -1,98 +1,227 @@
-# DSH 小鲸鱼桌面宠物(quickshell 版)
+# DSH 小鲸鱼桌面宠物
 
 > [!IMPORTANT]
 > **原项目**:[DeepSeek-Balance-Whale-Widget](https://github.com/MeteorNOX/DeepSeek-Balance-Whale-Widget)
-> **原作者**:[MeteorNOX](https://github.com/MeteorNOX)(MIT License,© 2026)
-> 本项目是原项目的 **Wayland 桌面宠物衍生版**,立绘、rua.gif、音效与部分台词均来自原项目,版权归原作者所有,感谢!
+> **原作者**:[MeteorNOX](https://github.com/MeteorNOX)
+> 本项目是原项目的 Wayland / Windows 桌面宠物衍生版。立绘、rua.gif、音效与部分台词
+> 来自原项目,版权归原作者所有,感谢!
+>
+> **许可提醒**:代码是 MIT;小克立绘是 **CC BY-NC-SA 4.0(非商用)**;上游美术素材
+> 为 as-is,不适用 MIT。包含全部素材的发布包不可商业售卖。详见
+> [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) 和 [`LICENSE-ARTWORK.md`](LICENSE-ARTWORK.md)。
 
-基于 quickshell 的 layer-shell 实现,常驻置顶悬浮,适配 niri(其他 wlroots 系合成器理论上可用)。
+两种实现:
 
-## 运行
+- **Linux / Wayland**:Quickshell layer-shell 版,常驻置顶、无边框,适配 niri(其他
+  wlroots 系合成器理论上可用)。
+- **Windows 11**:Electron 便携版,免安装,解压双击即用(实验性适配,见下文)。
 
-> 本机已由 NixOS 配置(`home/programs/desktop/whale-pet.nix`)接管:配置声明在 nix 里,
-> 由 systemd 用户服务 `dsh-pet.service` 开机自启。下面命令仅用于本地开发调试。
+## 快速开始
+
+### Linux / Wayland
+
+依赖:Quickshell(Qt 6)、支持 `wlr-layer-shell` 的合成器、PipeWire(`pw-play`)或
+`ffplay` / `paplay`。
 
 ```sh
-~/Documents/project/quickshell-whale-pet/run.sh          # 启动(已启动则跳过)
-~/Documents/project/quickshell-whale-pet/run.sh stop     # 退出
-~/Documents/project/quickshell-whale-pet/run.sh restart  # 重启
+git clone https://github.com/setsuna391/quickshell-whale-pet.git
+cd quickshell-whale-pet
+./run.sh            # 启动(已启动则跳过)
+./run.sh stop       # 退出
+./run.sh restart    # 重启
 ```
 
-不会影响 caelestia shell(独立目录,独立实例)。
+### Windows 11
+
+1. 从 [Releases](https://github.com/setsuna391/quickshell-whale-pet/releases/latest)
+   下载 `DSH-Pet-1.1.0-win32-x64.zip`。
+2. 解压到任意目录,双击 `DSH-Pet.exe`。
+3. 首次运行会在 `%APPDATA%\dsh-pet\config.json` 生成配置;托盘图标可换模型 / 开关音效 / 退出。
+4. 未签名程序,SmartScreen 提示时选「更多信息 → 仍要运行」。
+
+> Windows 版是 Electron 重写的实验性适配:窗口置顶、透明点击穿透、拖拽吸附、
+> 气泡/音效/余额/托盘换模型均已接好,但尚未在 Win11 实机长期验证,欢迎反馈。
 
 ## 交互
 
 | 操作 | 效果 |
 | --- | --- |
-| 左键点鲸鱼 | Q 弹 + 音效(按下/松开两声)+ 随机台词气泡(含各家余额/峰谷提示,5 秒自动收起) |
+| 左键点宠物 | Q 弹 + 音效(按下/松开两声)+ 随机台词气泡(5 秒自动收起) |
 | 再点气泡 | 换一段随机台词 |
-| 右键鲸鱼 | 峰谷时段 + 各家余额气泡(有气泡时先关闭) |
-| 拖拽 | 移动位置,靠近左/右边缘自动吸附;吸到左边整体水平镜像 |
+| 右键宠物 | 峰谷时段 + 各家余额气泡(有气泡时先关闭) |
+| 拖拽 | 水平移动,靠近左/右边缘自动吸附;吸到左边整体镜像;位置自动记忆 |
+| 中键点宠物 | 在模型列表里循环换装 |
+| 托盘菜单(Windows) | 换模型、音效、自言自语、打开配置、退出 |
+
+## 换模型
+
+Linux:
+
+```sh
+./model.sh              # 查看当前模型和可用模型
+./model.sh next         # 切换到下一个
+./model.sh xiaoke       # 按名字模糊匹配(小克)
+./model.sh gptniang     # GPT娘
+./model.sh default      # 换回小鲸鱼
+./model.sh characters/xxx.png   # 相对 assets/ 或绝对路径
+```
+
+选择会写入 `config.json` 并立即通知运行中的宠物;若 config 是 Nix 只读软链,则只对
+当前实例生效。也可以直接走 IPC:
+
+```sh
+qs ipc -p /path/to/quickshell-whale-pet call dsh-pet setModel characters/xiaoke.png
+qs ipc -p /path/to/quickshell-whale-pet call dsh-pet getModel
+```
+
+niri 键位示例(按 `Mod+M` 换下一个):
+
+```kdl
+Mod+M { spawn "sh" "-c" "/path/to/quickshell-whale-pet/model.sh next"; }
+```
+
+Windows:中键点宠物,或右键托盘图标 →「换模型」。托盘菜单会读取 `models` 列表。
+
+把新图片丢进 `assets/` 或 `assets/characters/` 即可(`model.sh list` 会自动发现;
+Windows 版改 `models` 数组后重启或托盘「重新读取配置」)。
 
 ## 配置
 
-> 音效通过 `pw-play`(PipeWire)播放,`ffplay` 兜底,并支持音量。
+| 平台 | 路径 |
+| --- | --- |
+| Linux | `~/.config/dsh-pet/config.json`(若由 Nix home-manager 管理,可能是只读软链) |
+| Windows | `%APPDATA%\dsh-pet\config.json` |
 
-设置由 NixOS 配置生成,写入 **`~/.config/dsh-pet/config.json`**(只读软链);
-改动请编辑 `home/programs/desktop/whale-pet.nix` 后 `nh home switch`,宠物约 2 秒内自动生效:
+保存后约 2 秒内热更新(Linux 用 FileView/轮询,Windows 用文件监听),不用重启:
 
 ```json
 {
-  "scale": 0.8,             // 缩放,0.6 – 2.5
+  "scale": 1.0,             // 缩放 0.6 – 2.5
   "sound": true,            // 音效开关
-  "soundSet": "duck",       // duck = 小黄鸭(Ya1/Ya2),fx1 = 音效1(D1/D2)
+  "soundSet": "duck",       // duck = 小黄鸭(Ya1/Ya2), fx1 = 音效1(D1/D2)
   "volume": 1.0,            // 音效音量 0 – 1
-  "model": "DSniang1.png",  // 角色立绘(assets 下文件名,或绝对路径)
-  "edgePad": 3,             // 窗口左右内衬 px,越小贴边越紧
+  "model": "DSniang1.png",  // 当前立绘(assets 下文件名,或绝对路径)
+  "models": [               // 中键 / model.sh next 的循环顺序
+    "DSniang1.png",
+    "characters/xiaoke.png",
+    "characters/gptniang.png"
+  ],
+  "bubbleScale": 1.3,       // 气泡大小 0.8 – 2.5
+  "edgePad": 3,             // 窗口左右内衬 px
   "snapZone": 0.22,         // 左右吸附区占屏幕宽度的比例
   "idleTalk": true,         // 发呆自言自语
-  "idleTalkMinutes": 5,     // 自言自语平均间隔(分钟,实际随机 ±50%)
-  "idleTalkChance": 0.4     // 每次触发说话的概率 0 – 1
+  "idleTalkMinutes": 5,     // 平均间隔(分钟,实际随机 ±50%)
+  "idleTalkChance": 0.4,    // 每次触发说话的概率 0 – 1
+  "screen": "DP-2"          // Linux:输出名(niri msg outputs);Windows:显示器序号或名称;留空 = 主屏
 }
 ```
 
-鲸鱼在屏幕上的位置(`state.json` 里的 `petX` / `mirrored`)由拖拽自动记忆,不用手动改。
+位置记忆:Linux 在 `~/.config/dsh-pet/state.json`;Windows 在
+`%APPDATA%\dsh-pet\state.json`,由拖拽自动写入,不用手改。
 
-## 多家余额(可选)
+### 多家余额(可选)
 
-`config.json` 的 `balance` 数组,想报谁的余额就填谁:
+`config.json` 的 `balance` 数组:
 
 ```json
 "balance": [
-  { "name": "DeepSeek",  "type": "deepseek",    "apiKey": "" },
-  { "name": "OpenRouter", "type": "openrouter", "apiKey": "sk-or-..." },
-  { "name": "硅基流动",   "type": "siliconflow", "apiKey": "sk-..." }
+  { "name": "DeepSeek",   "type": "deepseek",    "apiKey": "" },
+  { "name": "OpenRouter", "type": "openrouter",  "apiKey": "" },
+  { "name": "硅基流动",    "type": "siliconflow", "apiKey": "" }
 ]
 ```
 
-- `deepseek`:空 apiKey 时自动读 `~/.config/dsh-pet/api_key` 或环境变量 `DEEPSEEK_API_KEY`(兼容旧配置)
-- `openrouter`:空时读环境变量 `OPENROUTER_API_KEY`;余额 = 总额度 - 已用
-- `siliconflow`:空时读环境变量 `SILICONFLOW_API_KEY`
-- 右键鲸鱼即可看到各家余额,每 60 秒刷新一次
-- 全都不配置也不影响其他功能,只是余额台词变成随机卖萌文案
+- **不要把 key 写进 Nix 配置**:`/nix/store` 全局可读,旧 generation 会一直保留。
+- 建议 `apiKey` 留空,改用 key 文件或环境变量;key 文件建议 `chmod 600`。
+- 文件名(Linux 在 `~/.config/dsh-pet/`,Windows 在 `%APPDATA%\dsh-pet\`):
+  - `deepseek` → `api_key`,或 `DEEPSEEK_API_KEY`
+  - `openrouter` → `openrouter_key`,或 `OPENROUTER_API_KEY`;余额 = 总额度 - 已用
+  - `siliconflow` → `siliconflow_key`,或 `SILICONFLOW_API_KEY`
+- 右键宠物查看余额,每 60 秒刷新;刷新时保留上一次数值。
+- 全都不配置也不影响其他功能,余额台词会变成随机卖萌文案。
 
 ## 开机自启
 
-本机已整合进 NixOS(见 `home/programs/desktop/whale-pet.nix`):由 systemd 用户服务
-`dsh-pet.service` 随 `graphical-session.target` 自动启动,崩溃自动重启,无需手动 spawn。
+### Linux(systemd user service 示例)
+
+```ini
+# ~/.config/systemd/user/dsh-pet.service
+[Unit]
+Description=DSH desktop pet (quickshell)
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=exec
+ExecStart=/path/to/quickshell-whale-pet/run.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical-session.target
+```
 
 ```sh
-systemctl --user status  dsh-pet.service   # 查看状态
-systemctl --user restart dsh-pet.service   # 重启
+systemctl --user enable --now dsh-pet.service
 ```
+
+NixOS / home-manager 用户可以把配置文件声明成 `xdg.configFile."dsh-pet/config.json"`,
+并用 `systemd.user.services` 管理进程;注意配置文件只读时 `model.sh` 只能临时切换。
+
+### Windows 11
+
+把 `DSH-Pet.exe` 的快捷方式放进 `shell:startup`(`Win+R` → 输入 `shell:startup`)。
+退出请用托盘菜单,直接关闭窗口只会隐藏。
+
+## 构建 Windows 便携包
+
+需要 `curl`、`unzip`、`zip`(Linux / macOS / WSL 均可):
+
+```sh
+windows/build-win.sh            # 默认 Electron 44.8.0
+windows/build-win.sh 44.8.0     # 指定版本
+```
+
+产物在 `windows/dist/DSH-Pet-1.1.0-win32-x64.zip`。脚本会从 npmmirror 下载 Electron
+(失败时回退 GitHub Releases),把 `resources/app` 替换成本项目并打包素材与许可文件。
 
 ## 文件结构
 
 ```
 quickshell-whale-pet/
-├── shell.qml        # 宠物本体(layer-shell 置顶、模板气泡、拖拽吸附、动画、音效)
-├── run.sh           # 本地开发启动器(start / stop / restart)
-├── README.md
-├── docs/            # 截图
-└── assets/          # 复制自原插件:立绘 / rua.gif / 两组音效
+├── shell.qml              # Linux/Wayland 宠物本体
+├── run.sh                 # Linux 启动器
+├── model.sh               # 快捷换模型
+├── assets/                # 立绘 / rua.gif / 音效 / characters/
+├── windows/               # Windows 11 Electron 便携版
+│   ├── main.js            # 窗口、点击穿透、拖拽吸附、余额、托盘
+│   ├── preload.js
+│   ├── shared.js          # 两边共用的布局公式
+│   ├── renderer/          # 气泡 / 台词 / 交互
+│   └── build-win.sh
+├── licenses/              # 上游与第三方许可/来源原文
+├── LICENSE                # 代码 MIT(含适用范围说明)
+├── LICENSE-ARTWORK.md     # 小克 CC BY-NC-SA 4.0
+├── THIRD_PARTY_NOTICES.md # 素材逐项说明
+└── README.md
 ```
 
-## 致谢
+## 许可与致谢
 
-- 🐋 立绘、rua.gif、音效素材与部分台词均来自 [DeepSeek-Balance-Whale-Widget](https://github.com/MeteorNOX/DeepSeek-Balance-Whale-Widget)(© 2026 MeteorNOX,MIT License),本项目为其衍生作品,感谢原作者!
-- 本项目同样以 [MIT License](LICENSE) 开源;assets/ 目录内容的版权归属见 LICENSE 中的 Third-party notices。
+- **代码**:[MIT](LICENSE),© 2026 setsuna391。
+- **小克立绘**(`assets/characters/xiaoke.png`):来自
+  [dsh-xiaoke-widget](https://github.com/aklnaaw/dsh-xiaoke-widget),
+  **CC BY-NC-SA 4.0**(署名、非商用、同协议共享)。像素未改,仅重命名。
+- **GPT娘立绘**(`assets/characters/gptniang.png`):来自
+  [dsh-gpt-niang-widget](https://github.com/xixingyingmie/dsh-gpt-niang-widget),
+  按该项目 PROVENANCE 声明为 MIT;本仓库版本做了伽马 / 饱和度 / 锐化调整。
+- **上游小鲸鱼素材**(`DSniang1.png`、`rua.gif`、`D1/D2/Ya1/Ya2.mp3` 及部分文案):
+  来自 [DeepSeek-Balance-Whale-Widget](https://github.com/MeteorNOX/DeepSeek-Balance-Whale-Widget),
+  © 2026 MeteorNOX。上游明确说明 `assets/**` **不适用 MIT**,按 as-is 随插件分发、
+  不授予再许可;本项目为运行桌宠而随包包含,权利仍归原作者。
+- **Electron / Chromium**:MIT,随 Windows 包附带各自的许可文本。
+- 完整说明与 takedown 方式见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
+
+> 因为包含 CC BY-NC-SA 4.0 的小克立绘,**包含全部素材的发布包不得用于商业售卖**。
+> 代码本身仍是 MIT;如果只需要宽松许可,可删除 `assets/characters/xiaoke.png`
+> 并从 `models` 移除。
