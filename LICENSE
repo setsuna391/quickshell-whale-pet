@@ -22,9 +22,20 @@ SOFTWARE.
 
 ------------------------------------------------------------------------
 
-Third-party notices:
-Portions of this project (the whale artwork, rua.gif and sound effects
-under assets/, along with some UI copy) are derived from
-DeepSeek-Balance-Whale-Widget, Copyright (c) 2026 MeteorNOX,
-licensed under the MIT License:
-https://github.com/MeteorNOX/DeepSeek-Balance-Whale-Widget
+Scope of this MIT license:
+
+This license applies to the source code and original materials created by
+setsuna391. It does NOT apply to bundled character artwork or upstream assets.
+
+  - xiaoke character artwork (assets/characters/xiaoke.png):
+    CC BY-NC-SA 4.0. See LICENSE-ARTWORK.md
+  - gptniang character artwork (assets/characters/gptniang.png):
+    MIT according to its source project. See THIRD_PARTY_NOTICES.md
+  - upstream whale artwork, rua.gif, sound effects and some UI copy:
+    provided "as-is" by DeepSeek-Balance-Whale-Widget (Copyright (c) 2026
+    MeteorNOX), not covered by MIT and not sublicensed by this project.
+    See THIRD_PARTY_NOTICES.md and the upstream provenance:
+    https://github.com/MeteorNOX/DeepSeek-Balance-Whale-Widget
+
+Because the bundle contains the CC BY-NC-SA 4.0 xiaoke artwork, the bundle as a
+whole must not be sold commercially. See THIRD_PARTY_NOTICES.md.
