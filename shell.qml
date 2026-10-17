@@ -15,7 +15,7 @@ ShellRoot {
     PanelWindow {
         id: win
 
-        // ---- 可调配置(由 config.json 轮询更新,见底部 configProc) ----
+        // ---- 可调配置(由 config.json 热更新,见底部 configView) ----
         property real petScale: 1.0          // 缩放 0.6 – 2.5
         property bool soundOn: true          // 音效开关
         property string soundSet: "duck"     // duck = 小黄鸭(Ya), fx1 = 音效1(D)
@@ -24,9 +24,14 @@ ShellRoot {
         property bool idleTalk: true         // 发呆自言自语
         property int idleTalkMinutes: 5      // 自言自语间隔(分钟)
         property real idleTalkChance: 0.4    // 每次触发说话的概率
+        property real idleInterval: 300000   // 下一次自言自语的实际间隔(随机化后)
         property real volume: 1.0            // 音效音量 0 – 1
         property string model: "DSniang1.png" // 角色立绘(assets 下文件名,或绝对路径)
+        property string audioPlayer: ""      // 启动时探测到的音频播放器
         property real bubbleScale: 1.3       // 气泡大小(相对鲸鱼宽度,0.8 – 2.5)
+        property string screenName: ""       // 显示在哪个输出(如 "DP-2");空 = 默认屏
+        // 中键循环换装用的模型列表(脚本/IPC 可切换到任意图片)
+        property var modelChoices: ["DSniang1.png", "characters/xiaoke.png", "characters/gptniang.png"]
 
         // ---- 气泡(复刻上游 SVG 模板) ----
         readonly property color bubbleFill: "#ffffff"
@@ -50,6 +55,9 @@ ShellRoot {
         implicitWidth: Math.round((whaleW + edgePad * 2) * bubbleScale)
         implicitHeight: whaleH + whaleTop
 
+        // 目标输出:按输出名选屏(如 "DP-2");名字为空或没找到时回落到第一个屏
+        screen: win.pickScreen()
+
         color: "transparent"
         visible: win.bootReady                       // 配置+位置就绪后才出现,首帧即正确大小
         anchors { bottom: true; left: true }
@@ -68,12 +76,9 @@ ShellRoot {
         property bool bubbleVisible: false
         property bool bubbleGif: false
         property var bubbleLines: []
-        property bool balanceOk: false
-        property string balanceText: "--"
-        property string currency: "CNY"
         // ---- 多家余额 ----
         property var balanceSources: [{ name: "DeepSeek", type: "deepseek", apiKey: "" }]
-        property var balanceResults: [{ name: "DeepSeek", amount: "--", currency: "", ok: false }]
+        property var balanceResults: [{ name: "DeepSeek", amount: "--", currency: "", ok: false, err: false }]
         property int balanceCursor: 0
         property string balanceSig: ""
         property var balSrc: null      // 当前请求对应的余额源
@@ -97,15 +102,28 @@ ShellRoot {
             NumberAnimation { duration: 260; easing.type: Easing.OutCubic }
         }
         // 任何宽度变化(开关聊天面板/改缩放)都按吸附状态强制贴边,天然免疫时序竞态
-        onWidthChanged: {
+        onWidthChanged: win.resnap()
+        // 换屏后新屏幕宽度不同,按吸附状态重新贴边
+        onScreenChanged: win.resnap()
+
+        function clampX(x) {
+            return Math.max(0, Math.min(win.screenW - win.width, Math.round(x)));
+        }
+        function resnap() {
             if (petX < 0 || dragging) return;
             if (snapRight) petX = screenW - width;
             else if (mirrored) petX = 0;
             else petX = clampX(petX);
         }
 
-        function clampX(x) {
-            return Math.max(0, Math.min(win.screenW - win.width, Math.round(x)));
+        // 按输出名选屏(如 "DP-2");名字为空或没找到时用第一个屏,保持原有默认行为
+        function pickScreen() {
+            const list = Quickshell.screens;
+            if (win.screenName.length > 0) {
+                for (let i = 0; i < list.length; i++)
+                    if (list[i].name === win.screenName) return list[i];
+            }
+            return list.length > 0 ? list[0] : null;
         }
 
         // ---------- 台词 ----------
@@ -120,12 +138,15 @@ ShellRoot {
         function group1() {
             const peak = win.isPeak();
             const lines = [{ t: (peak ? "梁文峰" : "梁文谷") + "(DeepSeek)", s: "P", c: peak ? "#e0433f" : "#2fa24c" }];
-            let any = false;
+            let any = false, anyErr = false;
             for (const r of win.balanceResults) {
                 if (r.ok) { lines.push({ t: r.name + " " + r.amount + "\u00A0" + r.currency, s: "B", c: "" }); any = true; }
-                else lines.push({ t: r.name + " --", s: "A", c: win.bubbleMuted });
+                else {
+                    if (r.err) anyErr = true;
+                    lines.push({ t: r.name + " " + (r.err ? r.amount : "--"), s: "A", c: win.bubbleMuted });
+                }
             }
-            if (!any) {
+            if (!any && !anyErr) {
                 return [{ t: pickOne(["鲸鱼娘上岗啦~", "今天也要加油鸭！不对，加油鲸！", "余额？我看看...看不了啦，没给我钥匙~", "在 config.json 的 balance 里填 key,我就能报余额啦~"]), s: "A", c: "" }];
             }
             return lines;
@@ -284,17 +305,64 @@ ShellRoot {
         }
         function closeBubble() { win.bubbleVisible = false; bubbleCloseTimer.stop(); }
 
+        // ---------- 换模型 ----------
+        function modelLabel(m) {
+            const base = m.split("/").pop().replace(/\.[^.]+$/, "");
+            const names = { "DSniang1": "小鲸鱼", "xiaoke": "小克", "gptniang": "GPT娘" };
+            return names[base] || base;
+        }
+        function switchModel(name, announce) {
+            if (!name || name === "default") name = "DSniang1.png";
+            win.model = name;
+            if (announce !== false)
+                win.showBubble([{ t: "换装完成：" + win.modelLabel(name), s: "A", c: "" }]);
+            return win.model;
+        }
+        function cycleModel() {
+            const list = win.modelChoices;
+            const i = list.indexOf(win.model);
+            return win.switchModel(list[(i + 1) % list.length]);
+        }
+
         // ---------- 音效 ----------
         function playSfx(file) {
             if (!win.soundOn) return;
             const v = Math.max(0, Math.min(1, win.volume));
-            // pw-play(pipewire) 优先, ffplay 兜底, paplay 兼容旧环境
-            Quickshell.execDetached(["sh", "-c",
-                'f="$1"; v="$2"; pct="$3"; pa="$4"; ' +
-                'command -v pw-play >/dev/null && exec pw-play --volume "$v" "$f"; ' +
-                'command -v ffplay >/dev/null && exec ffplay -nodisp -autoexit -loglevel quiet -volume "$pct" "$f"; ' +
-                'command -v paplay >/dev/null && exec paplay --volume "$pa" "$f"',
-                "sh", win.assetDir + file, v.toFixed(2), String(Math.round(v * 100)), String(Math.round(v * 65536))]);
+            const f = win.assetDir + file;
+            if (win.audioPlayer === "pw-play") {
+                Quickshell.execDetached(["pw-play", "--volume", v.toFixed(2), f]);
+            } else if (win.audioPlayer === "ffplay") {
+                Quickshell.execDetached(["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet",
+                    "-volume", String(Math.round(v * 100)), f]);
+            } else if (win.audioPlayer === "paplay") {
+                Quickshell.execDetached(["paplay", "--volume", String(Math.round(v * 65536)), f]);
+            } else if (win.audioPlayer === "none") {
+                return;
+            } else {
+                // 探测尚未完成时的兜底:pw-play 优先, ffplay / paplay 次之
+                Quickshell.execDetached(["sh", "-c",
+                    'f="$1"; v="$2"; pct="$3"; pa="$4"; ' +
+                    'command -v pw-play >/dev/null && exec pw-play --volume "$v" "$f"; ' +
+                    'command -v ffplay >/dev/null && exec ffplay -nodisp -autoexit -loglevel quiet -volume "$pct" "$f"; ' +
+                    'command -v paplay >/dev/null && exec paplay --volume "$pa" "$f"',
+                    "sh", f, v.toFixed(2), String(Math.round(v * 100)), String(Math.round(v * 65536))]);
+            }
+        }
+        // 播放器只在启动时探测一次,之后每次点击直接执行
+        Process {
+            id: audioProbe
+            running: true
+            command: ["sh", "-c",
+                'if command -v pw-play >/dev/null; then echo pw-play; ' +
+                'elif command -v ffplay >/dev/null; then echo ffplay; ' +
+                'elif command -v paplay >/dev/null; then echo paplay; ' +
+                'else echo none; fi']
+            stdout: StdioCollector {
+                onStreamFinished: {
+                    const p = text.trim();
+                    if (p.length > 0) win.audioPlayer = p;
+                }
+            }
         }
         function playPress() {
             playSfx(win.soundSet === "duck" ? "Ya1.mp3" : "D1.mp3");
@@ -305,12 +373,12 @@ ShellRoot {
 
         Component.onCompleted: {
             petX = clampX(win.screenW * 0.78 - win.width / 2);
-            configProc.running = true;   // 立即读配置,不等首轮轮询
+            configView.reload();         // 立即读配置,不等首轮轮询
             loadState.running = true;
             // 余额轮询由 applyConfig 在读到配置后启动(避免此处空 key 的空转与竞态)
         }
 
-        // ---------- 配置文件(每 2 秒轮询,改完自动生效) ----------
+        // ---------- 配置文件(文件改动即时生效,2 秒 reload 兜底) ----------
         function applyConfig(text) {
             let j;
             try { j = JSON.parse(text); } catch (e) { return; }
@@ -319,12 +387,23 @@ ShellRoot {
             if (j.soundSet === "duck" || j.soundSet === "fx1") soundSet = j.soundSet;
             if (typeof j.edgePad === "number") edgePad = Math.max(0, Math.min(24, Math.round(j.edgePad)));
             if (typeof j.snapZone === "number") snapZone = Math.max(0.05, Math.min(0.5, j.snapZone));
-            if (typeof j.idleTalk === "boolean") idleTalk = j.idleTalk;
-            if (typeof j.idleTalkMinutes === "number") idleTalkMinutes = Math.max(1, j.idleTalkMinutes);
+            if (typeof j.idleTalk === "boolean" && j.idleTalk !== idleTalk) {
+                idleTalk = j.idleTalk;
+                if (idleTalk) idleInterval = idleTalkMinutes * 60000;
+            }
+            if (typeof j.idleTalkMinutes === "number") {
+                const m = Math.max(1, j.idleTalkMinutes);
+                if (m !== idleTalkMinutes) { idleTalkMinutes = m; idleInterval = m * 60000; }
+            }
             if (typeof j.idleTalkChance === "number") idleTalkChance = Math.max(0, Math.min(1, j.idleTalkChance));
             if (typeof j.volume === "number") volume = Math.max(0, Math.min(1, j.volume));
             if (typeof j.model === "string" && j.model.length > 0) model = j.model;
+            if (Array.isArray(j.models)) {
+                const ms = j.models.filter(m => typeof m === "string" && m.length > 0);
+                if (ms.length > 0) modelChoices = ms;
+            }
             if (typeof j.bubbleScale === "number") bubbleScale = Math.max(0.8, Math.min(2.5, j.bubbleScale));
+            if (typeof j.screen === "string") screenName = j.screen;
             let srcs = [];
             if (Array.isArray(j.balance)) {
                 for (const b of j.balance) {
@@ -341,24 +420,30 @@ ShellRoot {
                 startBalanceCycle();
             }
         }
-        Process {
-            id: configProc
-            command: ["sh", "-c", "cat \"$HOME/.config/dsh-pet/config.json\" 2>/dev/null"]
-            stdout: StdioCollector {
-                onStreamFinished: {
-                    if (text.length > 0) win.applyConfig(text);
-                    else if (!win.defaultConfigWritten) {
-                        win.defaultConfigWritten = true;
-                        defaultConfigWriter.write();
-                    }
-                    win.cfgReady = true;
+        // FileView 监听普通文件改动即时生效;每 2 秒 reload 兜底,
+        // 因为 Nix 管理的 config.json 是软链,换软链时 inotify 不会跟到新目标
+        FileView {
+            id: configView
+            path: win.cfgDir + "/config.json"
+            watchChanges: true
+            onFileChanged: configView.reload()
+            onTextChanged: {
+                const t = configView.text();
+                if (t.length > 0) win.applyConfig(t);
+            }
+            onLoaded: win.cfgReady = true
+            onLoadFailed: {
+                if (!win.defaultConfigWritten) {
+                    win.defaultConfigWritten = true;
+                    defaultConfigWriter.write();
                 }
+                win.cfgReady = true;
             }
         }
         property bool defaultConfigWritten: false
         Timer {
             interval: 2000; running: true; repeat: true
-            onTriggered: { configProc.running = false; configProc.running = true; }
+            onTriggered: configView.reload()
         }
         Timer {
             interval: 1500; running: true; repeat: false
@@ -374,7 +459,8 @@ ShellRoot {
                         edgePad: win.edgePad, snapZone: win.snapZone,
                         idleTalk: win.idleTalk, idleTalkMinutes: win.idleTalkMinutes,
                         idleTalkChance: win.idleTalkChance,
-                        volume: win.volume, model: win.model, bubbleScale: win.bubbleScale })];
+                        volume: win.volume, model: win.model, bubbleScale: win.bubbleScale,
+                        screen: win.screenName })];
                 running = false;
                 running = true;
             }
@@ -384,11 +470,11 @@ ShellRoot {
         Timer {
             id: idleTalkTimer
             running: win.idleTalk; repeat: true
-            interval: win.idleTalkMinutes * 60000
+            interval: win.idleInterval
             onTriggered: {
                 if (!win.dragging && Math.random() < win.idleTalkChance && !win.bubbleVisible)
                     win.showBubble(win.randomLines());
-                interval = win.idleTalkMinutes * 60000 * (0.5 + Math.random());
+                win.idleInterval = win.idleTalkMinutes * 60000 * (0.5 + Math.random());
             }
         }
 
@@ -397,32 +483,42 @@ ShellRoot {
         // ---------- 多家余额轮询 ----------
         function startBalanceCycle() {
             balanceCursor = 0;
-            balanceResults = balanceSources.map(s2 => ({ name: s2.name, amount: "--", currency: "", ok: false }));
+            // 保留上一轮拿到的数值,避免每次刷新都先闪成 "--"
+            const old = win.balanceResults;
+            balanceResults = balanceSources.map((s2, i) => {
+                const prev = old[i];
+                return (prev && prev.name === s2.name)
+                    ? prev
+                    : { name: s2.name, amount: "--", currency: "", ok: false, err: false };
+            });
             balanceNextTimer.restart();
         }
         function nextBalance() {
-            if (balanceCursor >= balanceSources.length) {
-                balanceOk = balanceResults.some(r2 => r2.ok);
-                return;
-            }
+            if (balanceCursor >= balanceSources.length) return;
             const src = balanceSources[balanceCursor];
             let script = "";
             if (src.type === "deepseek") {
-                script = 'KEY="$1"; [ -z "$KEY" ] && KEY="$(cat "$HOME/.config/dsh-pet/api_key" 2>/dev/null)"; ' +
+                script = 'KEY="$PKEY"; [ -z "$KEY" ] && KEY="$(cat "$HOME/.config/dsh-pet/api_key" 2>/dev/null)"; ' +
                          '[ -z "$KEY" ] && KEY="$DEEPSEEK_API_KEY"; ' +
-                         '[ -n "$KEY" ] && curl -s --max-time 8 https://api.deepseek.com/user/balance -H "Authorization: Bearer $KEY"';
+                         '[ -z "$KEY" ] && { echo NOKEY; exit 0; }; ' +
+                         'curl -sS --connect-timeout 5 --max-time 8 -w "\\nSTATUS:%{http_code}" https://api.deepseek.com/user/balance -H "Authorization: Bearer $KEY"';
             } else if (src.type === "openrouter") {
-                script = 'KEY="$1"; [ -z "$KEY" ] && KEY="$OPENROUTER_API_KEY"; ' +
-                         '[ -n "$KEY" ] && curl -s --max-time 8 https://openrouter.ai/api/v1/credits -H "Authorization: Bearer $KEY"';
+                script = 'KEY="$PKEY"; [ -z "$KEY" ] && KEY="$(cat "$HOME/.config/dsh-pet/openrouter_key" 2>/dev/null)"; ' +
+                         '[ -z "$KEY" ] && KEY="$OPENROUTER_API_KEY"; ' +
+                         '[ -z "$KEY" ] && { echo NOKEY; exit 0; }; ' +
+                         'curl -sS --connect-timeout 5 --max-time 8 -w "\\nSTATUS:%{http_code}" https://openrouter.ai/api/v1/credits -H "Authorization: Bearer $KEY"';
             } else if (src.type === "siliconflow") {
-                script = 'KEY="$1"; [ -z "$KEY" ] && KEY="$SILICONFLOW_API_KEY"; ' +
-                         '[ -n "$KEY" ] && curl -s --max-time 8 https://api.siliconflow.cn/v1/user/info -H "Authorization: Bearer $KEY"';
+                script = 'KEY="$PKEY"; [ -z "$KEY" ] && KEY="$(cat "$HOME/.config/dsh-pet/siliconflow_key" 2>/dev/null)"; ' +
+                         '[ -z "$KEY" ] && KEY="$SILICONFLOW_API_KEY"; ' +
+                         '[ -z "$KEY" ] && { echo NOKEY; exit 0; }; ' +
+                         'curl -sS --connect-timeout 5 --max-time 8 -w "\\nSTATUS:%{http_code}" https://api.siliconflow.cn/v1/user/info -H "Authorization: Bearer $KEY"';
             }
             if (script === "") { balanceCursor++; balanceNextTimer.restart(); return; }
-            // key 通过命令行参数传入(Quickshell 的 Process.environment 在本环境不生效)
+            // key 走环境变量,不放进命令行参数,避免暴露在 /proc/*/cmdline
             balSrc = src;
             balIdx = balanceCursor;
-            balanceProc.command = ["sh", "-c", script, "sh", src.apiKey];
+            balanceProc.environment = { PKEY: src.apiKey };
+            balanceProc.command = ["sh", "-c", script];
             balanceProc.running = false;
             balanceProc.running = true;
         }
@@ -433,9 +529,14 @@ ShellRoot {
                     const src = win.balSrc;
                     const idx = win.balIdx;
                     if (!src || idx < 0) return;
-                    let amount = "--", cur = "", ok = false;
+                    let amount = "--", cur = "", ok = false, err = false;
+                    // 脚本在响应末尾追加 "\nSTATUS:<http_code>",用于区分未配置/鉴权失败/网络失败
+                    let payload = text, http = 0;
+                    const m = text.match(/\nSTATUS:(\d+)\s*$/);
+                    if (m) { http = parseInt(m[1]); payload = text.slice(0, m.index); }
+                    const noKey = payload.trim() === "NOKEY";
                     try {
-                        const j = JSON.parse(text);
+                        const j = JSON.parse(payload);
                         if (src.type === "deepseek" && j.balance_infos && j.balance_infos.length > 0) {
                             amount = parseFloat(j.balance_infos[0].total_balance).toFixed(2);
                             cur = j.balance_infos[0].currency || "CNY"; ok = true;
@@ -447,8 +548,14 @@ ShellRoot {
                             if (!isNaN(bal)) { amount = bal.toFixed(2); cur = "CNY"; ok = true; }
                         }
                     } catch (e) {}
+                    if (!ok && !noKey) {
+                        if (http === 401 || http === 403) { amount = "key 无效"; err = true; }
+                        else if (http === 429) { amount = "请求限流"; err = true; }
+                        else if (http === 0 || http >= 500) { amount = "连接失败"; err = true; }
+                        else if (http > 0) { amount = "HTTP " + http; err = true; }
+                    }
                     const res = win.balanceResults.slice();
-                    if (res[idx]) res[idx] = { name: src.name, amount: amount, currency: cur, ok: ok };
+                    if (res[idx]) res[idx] = { name: src.name, amount: amount, currency: cur, ok: ok, err: err };
                     win.balanceResults = res;
                     win.balanceCursor = idx + 1;
                     balanceNextTimer.restart();
@@ -458,7 +565,9 @@ ShellRoot {
         Timer { id: balanceNextTimer; interval: 0; onTriggered: win.nextBalance() }
         Timer {
             id: balanceTimer; interval: 60000; repeat: true; running: true
-            onTriggered: win.startBalanceCycle()
+            // 上一轮还没走完(源很多时)就跳过,避免两轮请求互相覆盖
+            onTriggered: if (!balanceProc.running && win.balanceCursor >= win.balanceSources.length)
+                win.startBalanceCycle()
         }
 
         // ---------- 吸附 ----------
@@ -494,8 +603,7 @@ ShellRoot {
                         if (typeof j.snapRight === "boolean") win.snapRight = j.snapRight;
                         win.placeRight = win.snapRight;
                         // 存档位置可能来自其他分辨率/缩放会话而超出屏幕,这里强制回收
-                        if (win.snapRight) win.petX = win.screenW - win.width;
-                        else if (win.mirrored) win.petX = 0;
+                        win.resnap();
                     } catch (e) {}
                     win.stateReady = true;
                 }
@@ -512,16 +620,27 @@ ShellRoot {
             }
         }
 
+        // ---------- IPC(供 model.sh / qs ipc 调用) ----------
+        IpcHandler {
+            target: "dsh-pet"
+            function getModel(): string { return win.model; }
+            function setModel(name: string): string { return win.switchModel(name); }
+            function nextModel(): string { return win.cycleModel(); }
+            function listModels(): string { return win.modelChoices.join("\n"); }
+            function say(text: string): void { win.showBubble([{ t: text, s: "A", c: "" }]); }
+        }
+
         // ---------- 鲸鱼本体 ----------
         Image {
             id: whaleImg
             source: win.model.charAt(0) === "/" ? ("file://" + win.model) : ("assets/" + win.model)
             x: win.placeRight ? win.width - win.whaleW - win.edgePad : win.edgePad
             anchors.bottom: parent.bottom
-            anchors.bottomMargin: 0
             width: win.whaleW
             height: win.whaleH
-            mipmap: true
+            fillMode: Image.PreserveAspectFit
+            // 小尺寸时用 mipmap 抗锯齿;正常尺寸关掉,避免缩放后发糊
+            mipmap: win.petScale < 0.8
             transform: Scale {
                 origin.x: win.whaleW / 2
                 origin.y: win.whaleH
@@ -558,7 +677,7 @@ ShellRoot {
                 anchors.fill: parent
                 hoverEnabled: true
                 cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
-                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
                 property real lastX: 0
                 property real pressX: 0
 
@@ -591,6 +710,9 @@ ShellRoot {
                         if (side !== 0) win.snapTo(side);
                         else { win.mirrored = false; win.snapRight = false; }
                         saveState.save();
+                    } else if (button === Qt.MiddleButton) {
+                        // 中键:循环换装
+                        win.cycleModel();
                     } else if (button === Qt.RightButton) {
                         // 右键:峰谷 + 余额;有气泡先关
                         if (win.bubbleVisible) win.closeBubble();
@@ -703,7 +825,8 @@ ShellRoot {
                         color: modelData.c || win.bubbleText
                         font.family: "LXGW WenKai"
                         font.weight: Font.Bold
-                        font.pixelSize: 19
+                        // 跟随窗口宽度缩放:默认配置(宽 229)下为 19px
+                        font.pixelSize: Math.max(9, Math.round(19 * win.width / 229))
                     }
                 }
             }
@@ -712,7 +835,11 @@ ShellRoot {
         // ---------- 点击穿透遮罩 ----------
         mask: Region {
             Region { item: whaleHit }
-            Region { item: bubbleBox }
+            Region {
+                item: bubbleBox
+                // 气泡隐藏时从遮罩中扣除,避免透明区域挡住下层窗口点击
+                intersection: bubbleBox.visible ? Intersection.Combine : Intersection.Subtract
+            }
         }
     }
 }
