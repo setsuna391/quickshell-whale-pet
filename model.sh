@@ -12,6 +12,7 @@ DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 asset_models() {
     find "$DIR/assets" -maxdepth 2 -type f \
         \( -iname '*.png' -o -iname '*.webp' -o -iname '*.jpg' -o -iname '*.jpeg' \) \
+        ! -path "$DIR/assets/scaled/*" \
         | sed "s|^$DIR/assets/||" | sort
 }
 

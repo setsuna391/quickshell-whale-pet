@@ -27,6 +27,8 @@ ShellRoot {
         property real idleInterval: 300000   // 下一次自言自语的实际间隔(随机化后)
         property real volume: 1.0            // 音效音量 0 – 1
         property string model: "DSniang1.png" // 角色立绘(assets 下文件名,或绝对路径)
+        property bool modelFallback: false   // 预缩放图缺失时回退原图
+        readonly property var scaledSizes: [102, 136, 170, 204, 255, 340, 425, 510, 640, 850]
         property string audioPlayer: ""      // 启动时探测到的音频播放器
         property real bubbleScale: 1.3       // 气泡大小(相对鲸鱼宽度,0.8 – 2.5)
         property string screenName: ""       // 显示在哪个输出(如 "DP-2");空 = 默认屏
@@ -57,6 +59,10 @@ ShellRoot {
 
         // 目标输出:按输出名选屏(如 "DP-2");名字为空或没找到时回落到第一个屏
         screen: win.pickScreen()
+        onModelChanged: win.modelFallback = false
+        onWhaleWChanged: win.modelFallback = false
+        readonly property real screenDpr: win.screen ? win.screen.devicePixelRatio : 1
+        onScreenDprChanged: win.modelFallback = false
 
         color: "transparent"
         visible: win.bootReady                       // 配置+位置就绪后才出现,首帧即正确大小
@@ -310,6 +316,25 @@ ShellRoot {
             const base = m.split("/").pop().replace(/\.[^.]+$/, "");
             const names = { "DSniang1": "小鲸鱼", "xiaoke": "小克", "gptniang": "GPT娘" };
             return names[base] || base;
+        }
+        function rawModelSource(m) {
+            return m.charAt(0) === "/" ? ("file://" + m) : ("assets/" + m);
+        }
+        // Linux 上直接用 610 源图给 GPU 缩小会发虚;按显示尺寸选 Lanczos 预缩放图。
+        function modelSource(m) {
+            const known = {
+                "DSniang1.png": "DSniang1",
+                "characters/xiaoke.png": "xiaoke",
+                "characters/gptniang.png": "gptniang"
+            };
+            const base = known[m];
+            if (!base) return win.rawModelSource(m);
+            const target = win.whaleW * win.screenDpr;
+            let size = win.scaledSizes[win.scaledSizes.length - 1];
+            for (const s of win.scaledSizes) {
+                if (s >= target) { size = s; break; }
+            }
+            return "assets/scaled/" + base + "@" + size + ".png";
         }
         function switchModel(name, announce) {
             if (!name || name === "default") name = "DSniang1.png";
@@ -633,14 +658,17 @@ ShellRoot {
         // ---------- 鲸鱼本体 ----------
         Image {
             id: whaleImg
-            source: win.model.charAt(0) === "/" ? ("file://" + win.model) : ("assets/" + win.model)
+            source: win.modelFallback ? win.rawModelSource(win.model) : win.modelSource(win.model)
             x: win.placeRight ? win.width - win.whaleW - win.edgePad : win.edgePad
             anchors.bottom: parent.bottom
             width: win.whaleW
             height: win.whaleH
             fillMode: Image.PreserveAspectFit
-            // 小尺寸时用 mipmap 抗锯齿;正常尺寸关掉,避免缩放后发糊
-            mipmap: win.petScale < 0.8
+            // 源图已按显示尺寸预缩放,关闭 mipmap 保持锐利;缺预缩放图时仍可回退原图
+            mipmap: false
+            onStatusChanged: {
+                if (status === Image.Error && !win.modelFallback) win.modelFallback = true;
+            }
             transform: Scale {
                 origin.x: win.whaleW / 2
                 origin.y: win.whaleH

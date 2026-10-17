@@ -34,6 +34,8 @@ mkdir -p "$OUT/resources/app/renderer" "$OUT/resources/assets"
 cp "$HERE/package.json" "$HERE/main.js" "$HERE/preload.js" "$HERE/shared.js" "$OUT/resources/app/"
 cp "$HERE/renderer/"* "$OUT/resources/app/renderer/"
 cp -r "$ROOT/assets/." "$OUT/resources/assets/"
+# Linux 专用预缩放图,Windows/Chromium 不需要
+rm -rf "$OUT/resources/assets/scaled"
 if [ -f "$OUT/electron.exe" ]; then mv "$OUT/electron.exe" "$OUT/DSH-Pet.exe"; fi
 
 # 协议与说明随包分发(Electron 自带的 LICENSE / LICENSES.chromium.html 保留)

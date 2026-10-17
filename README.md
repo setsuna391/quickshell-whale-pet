@@ -173,6 +173,20 @@ NixOS / home-manager 用户可以把配置文件声明成 `xdg.configFile."dsh-p
 把 `DSH-Pet.exe` 的快捷方式放进 `shell:startup`(`Win+R` → 输入 `shell:startup`)。
 退出请用托盘菜单,直接关闭窗口只会隐藏。
 
+### Linux 清晰度
+
+Qt Quick 直接把 610px 源图缩到 170px 会发虚。Linux 版在发布前用 Lanczos 预缩放
+到常见尺寸,存放在 `assets/scaled/`,QML 会根据 `scale` 和屏幕 DPR 自动选最接近的
+一档,避免 GPU 直接缩小。
+
+新增模型后,若要同样的清晰度:
+
+```sh
+tools/gen-scaled.sh      # 需要 ImageMagick,然后一起提交 assets/scaled/
+```
+
+Windows/Electron 版由 Chromium 处理缩放,不需要这些预缩放图。
+
 ## 构建 Windows 便携包
 
 需要 `curl`、`unzip`、`zip`(Linux / macOS / WSL 均可):
@@ -192,7 +206,8 @@ quickshell-whale-pet/
 ├── shell.qml              # Linux/Wayland 宠物本体
 ├── run.sh                 # Linux 启动器
 ├── model.sh               # 快捷换模型
-├── assets/                # 立绘 / rua.gif / 音效 / characters/
+├── assets/                # 立绘 / rua.gif / 音效 / characters/ / scaled/
+├── tools/gen-scaled.sh    # 生成 Lanczos 预缩放立绘(Linux 清晰度)
 ├── windows/               # Windows 11 Electron 便携版
 │   ├── main.js            # 窗口、点击穿透、拖拽吸附、余额、托盘
 │   ├── preload.js
