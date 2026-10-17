@@ -1,10 +1,14 @@
 # Changelog
 
-## Unreleased
+## v1.1.1 — 2026-10-17
+
+### 修复
 
 - Linux/QML:按显示尺寸和 DPR 选择 Lanczos 预缩放立绘(`assets/scaled/`),解决
   610px 源图被 GPU 直接缩小导致的发虚;新增 `tools/gen-scaled.sh`
 - `model.sh` 自动排除 `assets/scaled/` 变体,避免出现在模型列表里
+
+Windows 包一并重建,功能与 v1.1.0 相同。
 
 ## v1.1.0 — 2026-10-17
 

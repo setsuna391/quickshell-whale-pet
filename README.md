@@ -34,7 +34,7 @@ cd quickshell-whale-pet
 ### Windows 11
 
 1. 从 [Releases](https://github.com/setsuna391/quickshell-whale-pet/releases/latest)
-   下载 `DSH-Pet-1.1.0-win32-x64.zip`。
+   下载 `DSH-Pet-1.1.1-win32-x64.zip`。
 2. 解压到任意目录,双击 `DSH-Pet.exe`。
 3. 首次运行会在 `%APPDATA%\dsh-pet\config.json` 生成配置;托盘图标可换模型 / 开关音效 / 退出。
 4. 未签名程序,SmartScreen 提示时选「更多信息 → 仍要运行」。
@@ -196,7 +196,7 @@ windows/build-win.sh            # 默认 Electron 44.8.0
 windows/build-win.sh 44.8.0     # 指定版本
 ```
 
-产物在 `windows/dist/DSH-Pet-1.1.0-win32-x64.zip`。脚本会从 npmmirror 下载 Electron
+产物在 `windows/dist/DSH-Pet-1.1.1-win32-x64.zip`。脚本会从 npmmirror 下载 Electron
 (失败时回退 GitHub Releases),把 `resources/app` 替换成本项目并打包素材与许可文件。
 
 ## 文件结构

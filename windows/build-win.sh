@@ -6,7 +6,7 @@ set -eu
 HERE="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 ROOT="$(CDPATH= cd -- "$HERE/.." && pwd)"
 VER="${1:-44.8.0}"
-NAME="DSH-Pet-1.1.0-win32-x64"
+NAME="DSH-Pet-1.1.1-win32-x64"
 CACHE="$HERE/.cache"
 DIST="$HERE/dist"
 ZIP="$CACHE/electron-v$VER-win32-x64.zip"
