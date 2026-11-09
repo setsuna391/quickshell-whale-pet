@@ -31,6 +31,28 @@ cd quickshell-whale-pet
 ./run.sh restart    # 重启
 ```
 
+### Nix / NixOS
+
+项目提供 flake 包（包含受限许可的美术素材，需允许 unfree 包）：
+
+```sh
+NIXPKGS_ALLOW_UNFREE=1 nix run --impure github:setsuna391/quickshell-whale-pet
+```
+
+也可以将 flake 加入 NixOS 或 home-manager 输入，添加
+`inputs.quickshell-whale-pet.overlays.default` 到 `nixpkgs.overlays`，然后安装
+`pkgs.dsh-pet`。安装后使用：
+
+```sh
+dsh-pet              # 启动
+dsh-pet stop         # 停止
+dsh-pet restart      # 重启
+dsh-pet-model next   # 换模型
+```
+
+NixOS / home-manager 中需要在相应的 nixpkgs 配置中允许 unfree 包。音效仍需要
+`pw-play`、`ffplay` 或 `paplay` 可在用户的 PATH 中找到。
+
 ### Windows 11
 
 1. 从 [Releases](https://github.com/setsuna391/quickshell-whale-pet/releases/latest)
@@ -94,7 +116,9 @@ Windows 版改 `models` 数组后重启或托盘「重新读取配置」)。
 
 保存后约 2 秒内热更新(Linux 用 FileView/轮询,Windows 用文件监听),不用重启:
 
-```json
+下面是带说明注释的 JSONC 示例；实际 `config.json` 必须删除注释，使用标准 JSON。
+
+```jsonc
 {
   "scale": 1.0,             // 缩放 0.6 – 2.5
   "sound": true,            // 音效开关

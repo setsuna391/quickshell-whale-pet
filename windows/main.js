@@ -17,6 +17,7 @@ if (!app.requestSingleInstanceLock()) {
   let cfgWatch = null;
   let balTimer = null;
   let balBusy = false;
+  let balGeneration = 0;
   let balances = [];
   let drag = null;
   let xAnim = null;
@@ -69,7 +70,14 @@ if (!app.requestSingleInstanceLock()) {
     if (!fs.existsSync(cfgPath)) {
       try { writeJson(cfgPath, S.defaultConfig()); } catch (e) { log("write default config failed", e); }
     }
-    return S.normalizeConfig(readJson(cfgPath, {}));
+    try {
+      const raw = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("配置必须是 JSON 对象");
+      return S.normalizeConfig(raw);
+    } catch (e) {
+      log("read config failed; keeping previous settings", e);
+      return cfg || S.defaultConfig();
+    }
   }
 
   function loadState() {
@@ -96,7 +104,8 @@ if (!app.requestSingleInstanceLock()) {
 
   function saveConfigPatch(patch) {
     try {
-      const raw = readJson(cfgPath, {});
+      const raw = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("配置必须是 JSON 对象");
       Object.assign(raw, patch);
       writeJson(cfgPath, raw);
     } catch (e) { log("save config failed", e); }
@@ -326,14 +335,24 @@ if (!app.requestSingleInstanceLock()) {
   async function refreshBalances() {
     if (balBusy) return;
     balBusy = true;
-    const results = [];
-    for (const src of cfg.balance) results.push(await fetchOne(src));
-    balances = results;
-    if (win && !win.isDestroyed()) win.webContents.send("balances", balances);
-    balBusy = false;
+    const generation = balGeneration;
+    const sources = cfg.balance.slice();
+    try {
+      const results = [];
+      for (const src of sources) {
+        results.push(await fetchOne(src));
+        if (generation !== balGeneration) return;
+      }
+      balances = results;
+      if (win && !win.isDestroyed()) win.webContents.send("balances", balances);
+    } finally {
+      balBusy = false;
+      if (generation !== balGeneration && !isQuitting) refreshBalances();
+    }
   }
 
   function startBalances() {
+    balGeneration++;
     if (balTimer) { clearInterval(balTimer); balTimer = null; }
     const names = cfg.balance.map((b) => b.name);
     balances = names.map((name) => ({ name, amount: "--", currency: "", ok: false, err: false }));

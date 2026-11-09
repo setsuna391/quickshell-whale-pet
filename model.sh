@@ -65,11 +65,24 @@ resolve_model() {
 
 persist_model() {
     python3 - "$1" <<'PY' >/dev/null 2>&1
-import json, os, sys
+import json, os, sys, tempfile
 p = os.path.expanduser("~/.config/dsh-pet/config.json")
-j = json.load(open(p))
+if os.path.islink(p):
+    raise OSError("config is a symlink")
+with open(p, encoding="utf-8") as f:
+    j = json.load(f)
+if not isinstance(j, dict):
+    raise ValueError("config must be an object")
 j["model"] = sys.argv[1]
-open(p, "w").write(json.dumps(j, ensure_ascii=False, separators=(",", ":")))
+fd, tmp = tempfile.mkstemp(dir=os.path.dirname(p), prefix=".config-")
+try:
+    os.fchmod(fd, os.stat(p).st_mode & 0o777)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(j, f, ensure_ascii=False, separators=(",", ":"))
+    os.replace(tmp, p)
+finally:
+    if os.path.exists(tmp):
+        os.unlink(tmp)
 PY
 }
 
@@ -84,6 +97,7 @@ apply_model() {
         out=$(qs ipc -p "$DIR" call dsh-pet setModel "$new" 2>/dev/null)
         [ -n "$out" ] && echo "宠物已切换: $out"
     fi
+    return 0
 }
 
 case "${1:-list}" in

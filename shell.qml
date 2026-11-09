@@ -87,6 +87,7 @@ ShellRoot {
         property var balanceResults: [{ name: "DeepSeek", amount: "--", currency: "", ok: false, err: false }]
         property int balanceCursor: 0
         property string balanceSig: ""
+        property int balanceGeneration: 0
         property var balSrc: null      // 当前请求对应的余额源
         property int balIdx: -1        // 当前请求对应的结果槽位
         // ---- 吸附 / 启动状态 ----
@@ -407,6 +408,7 @@ ShellRoot {
         function applyConfig(text) {
             let j;
             try { j = JSON.parse(text); } catch (e) { return; }
+            if (!j || typeof j !== "object" || Array.isArray(j)) return;
             if (typeof j.scale === "number") petScale = Math.max(0.6, Math.min(2.5, j.scale));
             if (typeof j.sound === "boolean") soundOn = j.sound;
             if (j.soundSet === "duck" || j.soundSet === "fx1") soundSet = j.soundSet;
@@ -441,7 +443,9 @@ ShellRoot {
             const sig = JSON.stringify(srcs);
             if (sig !== win.balanceSig) {   // 只在余额源真正变化时重开轮询,避免每次配置轮询都清空重拉
                 win.balanceSig = sig;
+                win.balanceGeneration++;
                 balanceSources = srcs;
+                balanceResults = [];
                 startBalanceCycle();
             }
         }
@@ -478,7 +482,7 @@ ShellRoot {
             id: defaultConfigWriter
             function write() {
                 command = ["sh", "-c",
-                    "mkdir -p \"$HOME/.config/dsh-pet\" && printf '%s' \"$1\" > \"$HOME/.config/dsh-pet/config.json\"",
+                    "mkdir -p \"$HOME/.config/dsh-pet\" && p=\"$HOME/.config/dsh-pet/config.json\"; [ -e \"$p\" ] || [ -L \"$p\" ] || (set -C; printf '%s' \"$1\" > \"$p\")",
                     "sh", JSON.stringify({
                         scale: win.petScale, sound: win.soundOn, soundSet: win.soundSet,
                         edgePad: win.edgePad, snapZone: win.snapZone,
@@ -516,7 +520,7 @@ ShellRoot {
                     ? prev
                     : { name: s2.name, amount: "--", currency: "", ok: false, err: false };
             });
-            balanceNextTimer.restart();
+            if (!balanceProc.running) balanceNextTimer.restart();
         }
         function nextBalance() {
             if (balanceCursor >= balanceSources.length) return;
@@ -526,22 +530,23 @@ ShellRoot {
                 script = 'KEY="$PKEY"; [ -z "$KEY" ] && KEY="$(cat "$HOME/.config/dsh-pet/api_key" 2>/dev/null)"; ' +
                          '[ -z "$KEY" ] && KEY="$DEEPSEEK_API_KEY"; ' +
                          '[ -z "$KEY" ] && { echo NOKEY; exit 0; }; ' +
-                         'curl -sS --connect-timeout 5 --max-time 8 -w "\\nSTATUS:%{http_code}" https://api.deepseek.com/user/balance -H "Authorization: Bearer $KEY"';
+                         'printf \'header = "Authorization: Bearer %s"\\n\' "$(printf %s "$KEY" | sed \'s/\\\\/\\\\\\\\/g; s/"/\\\\"/g\')" | curl -q -K - -sS --connect-timeout 5 --max-time 8 -w "\\nSTATUS:%{http_code}" https://api.deepseek.com/user/balance';
             } else if (src.type === "openrouter") {
                 script = 'KEY="$PKEY"; [ -z "$KEY" ] && KEY="$(cat "$HOME/.config/dsh-pet/openrouter_key" 2>/dev/null)"; ' +
                          '[ -z "$KEY" ] && KEY="$OPENROUTER_API_KEY"; ' +
                          '[ -z "$KEY" ] && { echo NOKEY; exit 0; }; ' +
-                         'curl -sS --connect-timeout 5 --max-time 8 -w "\\nSTATUS:%{http_code}" https://openrouter.ai/api/v1/credits -H "Authorization: Bearer $KEY"';
+                         'printf \'header = "Authorization: Bearer %s"\\n\' "$(printf %s "$KEY" | sed \'s/\\\\/\\\\\\\\/g; s/"/\\\\"/g\')" | curl -q -K - -sS --connect-timeout 5 --max-time 8 -w "\\nSTATUS:%{http_code}" https://openrouter.ai/api/v1/credits';
             } else if (src.type === "siliconflow") {
                 script = 'KEY="$PKEY"; [ -z "$KEY" ] && KEY="$(cat "$HOME/.config/dsh-pet/siliconflow_key" 2>/dev/null)"; ' +
                          '[ -z "$KEY" ] && KEY="$SILICONFLOW_API_KEY"; ' +
                          '[ -z "$KEY" ] && { echo NOKEY; exit 0; }; ' +
-                         'curl -sS --connect-timeout 5 --max-time 8 -w "\\nSTATUS:%{http_code}" https://api.siliconflow.cn/v1/user/info -H "Authorization: Bearer $KEY"';
+                         'printf \'header = "Authorization: Bearer %s"\\n\' "$(printf %s "$KEY" | sed \'s/\\\\/\\\\\\\\/g; s/"/\\\\"/g\')" | curl -q -K - -sS --connect-timeout 5 --max-time 8 -w "\\nSTATUS:%{http_code}" https://api.siliconflow.cn/v1/user/info';
             }
             if (script === "") { balanceCursor++; balanceNextTimer.restart(); return; }
             // key 走环境变量,不放进命令行参数,避免暴露在 /proc/*/cmdline
             balSrc = src;
             balIdx = balanceCursor;
+            balanceProc.generation = win.balanceGeneration;
             balanceProc.environment = { PKEY: src.apiKey };
             balanceProc.command = ["sh", "-c", script];
             balanceProc.running = false;
@@ -549,11 +554,17 @@ ShellRoot {
         }
         Process {
             id: balanceProc
+            property int generation: 0
             stdout: StdioCollector {
                 onStreamFinished: {
                     const src = win.balSrc;
                     const idx = win.balIdx;
                     if (!src || idx < 0) return;
+                    if (balanceProc.generation !== win.balanceGeneration) {
+                        win.balanceCursor = 0;
+                        balanceNextTimer.restart();
+                        return;
+                    }
                     let amount = "--", cur = "", ok = false, err = false;
                     // 脚本在响应末尾追加 "\nSTATUS:<http_code>",用于区分未配置/鉴权失败/网络失败
                     let payload = text, http = 0;
