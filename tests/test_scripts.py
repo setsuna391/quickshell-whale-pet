@@ -46,6 +46,22 @@ class ModelScriptTests(unittest.TestCase):
         self.assertTrue(self.config.is_symlink())
         self.assertEqual(json.loads(target.read_text())["model"], "old")
 
+    def test_menu_setting_preserves_config(self):
+        self.config.write_text('{"scale":0.8,"sound":true}', encoding="utf-8")
+        subprocess.run([os.sys.executable, str(ROOT / "tools/save-setting.py"), "reminders", "true"],
+                       env=self.env, check=True)
+        self.assertEqual(json.loads(self.config.read_text()),
+                         {"scale": 0.8, "sound": True, "reminders": True})
+
+    def test_menu_setting_does_not_replace_symlink(self):
+        target = self.home / "target.json"
+        target.write_text('{"sound":true}', encoding="utf-8")
+        self.config.symlink_to(target)
+        subprocess.run([os.sys.executable, str(ROOT / "tools/save-setting.py"), "sound", "false"],
+                       env=self.env, check=True)
+        self.assertTrue(self.config.is_symlink())
+        self.assertTrue(json.loads(target.read_text())["sound"])
+
 
 if __name__ == "__main__":
     unittest.main()

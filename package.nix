@@ -13,6 +13,8 @@ stdenvNoCC.mkDerivation {
     runHook preInstall
     mkdir -p "$out/share/dsh-pet" "$out/bin" "$out/share/doc/dsh-pet"
     cp shell.qml run.sh model.sh "$out/share/dsh-pet/"
+    mkdir -p "$out/share/dsh-pet/tools"
+    cp tools/save-setting.py tools/current-lyric.py "$out/share/dsh-pet/tools/"
     cp -r assets "$out/share/dsh-pet/"
     cp LICENSE LICENSE-ARTWORK.md THIRD_PARTY_NOTICES.md "$out/share/doc/dsh-pet/"
     cp -r licenses "$out/share/doc/dsh-pet/"

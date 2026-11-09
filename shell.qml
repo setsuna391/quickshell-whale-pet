@@ -8,6 +8,7 @@ import QtQuick.Shapes
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
+import Quickshell.Services.Mpris
 
 ShellRoot {
     id: root
@@ -24,6 +25,9 @@ ShellRoot {
         property bool idleTalk: true         // 发呆自言自语
         property int idleTalkMinutes: 5      // 自言自语间隔(分钟)
         property real idleTalkChance: 0.4    // 每次触发说话的概率
+        property bool reminders: false       // 定时休息提醒,默认不打扰
+        property int reminderMinutes: 60
+        property bool humming: true          // 持续显示当前歌曲歌词
         property real idleInterval: 300000   // 下一次自言自语的实际间隔(随机化后)
         property real volume: 1.0            // 音效音量 0 – 1
         property string model: "DSniang1.png" // 角色立绘(assets 下文件名,或绝对路径)
@@ -80,7 +84,17 @@ ShellRoot {
         property real sqx: 1               // 按压挤压系数
         property real sqy: 1
         property bool bubbleVisible: false
+        property bool lyricVisible: false
+        readonly property var lyricPlayer: Mpris.players.values.find(p => p.isPlaying) || null
+        readonly property string lyricArtist: lyricPlayer ? (lyricPlayer.metadata["xesam:artist"] || [lyricPlayer.trackArtist]).toString() : ""
+        readonly property string lyricTrackKey: lyricPlayer && lyricArtist && lyricPlayer.trackTitle
+            ? JSON.stringify([lyricPlayer.dbusName, lyricArtist, lyricPlayer.trackTitle]) : ""
+        property var lyricLines: []
+        property var plainLyricLines: []
+        property string lyricRequestKey: ""
         property bool bubbleGif: false
+        property bool menuVisible: false
+        property real headWiggle: 0
         property var bubbleLines: []
         // ---- 多家余额 ----
         property var balanceSources: [{ name: "DeepSeek", type: "deepseek", apiKey: "" }]
@@ -142,6 +156,41 @@ ShellRoot {
         }
         function pickOne(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
+        // 未内置专属文案的自定义模型沿用小鲸鱼的互动台词。
+        function characterKind() {
+            const name = win.model.split("/").pop().toLowerCase();
+            if (name === "xiaoke.png") return "xiaoke";
+            if (name === "gptniang.png") return "gptniang";
+            return "whale";
+        }
+        function characterLine(kind) {
+            const lines = {
+                whale: {
+                    idle: ["咕噜咕噜~今天也陪你一起摸鱼！", "鲸鱼娘正在桌面巡游中~", "有什么烦恼就藏进我的泡泡里吧！"],
+                    head: ["摸摸头~鲸鱼娘很开心！", "头顶痒痒的，再摸一下嘛~"],
+                    double: ["连续戳两下！鲸鱼娘转个圈~", "哇！你发现了双击的秘密！"],
+                    drag: ["搬家啦！新的风景也不错~", "抓稳啦，鲸鱼要起飞了！"]
+                },
+                xiaoke: {
+                    idle: ["小克在这里陪你哦~", "今天也要和小克一起加油！", "忙累了就看看小克吧~"],
+                    head: ["小克收到摸摸啦~", "嘿嘿，摸头会让小克开心！"],
+                    double: ["小克在！找我有什么事呀？", "双击召唤小克成功！"],
+                    drag: ["小克被带到新地方啦~", "慢一点，小克还没坐稳呢！"]
+                },
+                gptniang: {
+                    idle: ["GPT娘在线，今天有什么新想法？", "需要灵感的话，随时叫我哦~", "GPT娘正在陪你思考人生~"],
+                    head: ["摸头请求已接收，心情 +1！", "GPT娘的头也可以摸摸哦~"],
+                    double: ["双击指令收到！GPT娘随时待命~", "叮！GPT娘已响应你的召唤~"],
+                    drag: ["正在迁移 GPT娘……迁移完成！", "新坐标已设定，继续陪伴你~"]
+                }
+            };
+            return win.pickOne(lines[win.characterKind()][kind]);
+        }
+        function showCharacterReaction(kind) {
+            if (kind === "head") headWiggleAnim.restart();
+            win.showBubble([{ t: win.characterLine(kind), s: "A", c: "" }]);
+        }
+
         function group1() {
             const peak = win.isPeak();
             const lines = [{ t: (peak ? "梁文峰" : "梁文谷") + "(DeepSeek)", s: "P", c: peak ? "#e0433f" : "#2fa24c" }];
@@ -186,6 +235,8 @@ ShellRoot {
             return null;
         }
         function randomLines() {
+            if (Math.random() < 0.3)
+                return [{ t: win.characterLine("idle"), s: "A", c: "" }];
             const groups = [
                 { w: 18, f: group1 },   // 峰谷 + 余额
                 { w: 6,  f: () => [{ t: pickOne(["好模型... ↓", "好女孩...↓"]), s: "B", c: "" }] },
@@ -294,6 +345,8 @@ ShellRoot {
 
         // ---------- 气泡 ----------
         function showBubble(lines) {
+            win.lyricVisible = false;
+            win.menuVisible = false;
             if (lines === null) { // gif 组
                 win.bubbleGif = true;
             } else {
@@ -310,7 +363,36 @@ ShellRoot {
             win.bubbleVisible = true;
             bubbleCloseTimer.restart();
         }
-        function closeBubble() { win.bubbleVisible = false; bubbleCloseTimer.stop(); }
+        function closeBubble() { win.bubbleVisible = false; win.menuVisible = false; win.lyricVisible = false; bubbleCloseTimer.stop(); }
+        function showMenu() {
+            win.lyricVisible = false;
+            win.menuVisible = true;
+            win.bubbleGif = false;
+            win.bubbleVisible = true;
+            bubbleCloseTimer.stop();
+        }
+        function saveSetting(key, value) {
+            Quickshell.execDetached(["python3", win.assetDir + "../tools/save-setting.py", key, JSON.stringify(value)]);
+        }
+        function menuAction(action) {
+            if (action === "balance") win.showBubble(win.group1());
+            else if (action === "model") {
+                const model = win.cycleModel();
+                win.saveSetting("model", model);
+            } else if (action === "smaller" || action === "larger") {
+                win.petScale = Math.max(0.6, Math.min(2.5, Math.round((win.petScale + (action === "smaller" ? -0.1 : 0.1)) * 10) / 10));
+                win.saveSetting("scale", win.petScale);
+            } else if (action === "sound") {
+                win.soundOn = !win.soundOn;
+                win.saveSetting("sound", win.soundOn);
+            } else if (action === "reminders") {
+                win.reminders = !win.reminders;
+                win.saveSetting("reminders", win.reminders);
+            } else if (action === "humming") {
+                win.humming = !win.humming;
+                win.saveSetting("humming", win.humming);
+            }
+        }
 
         // ---------- 换模型 ----------
         function modelLabel(m) {
@@ -423,6 +505,9 @@ ShellRoot {
                 if (m !== idleTalkMinutes) { idleTalkMinutes = m; idleInterval = m * 60000; }
             }
             if (typeof j.idleTalkChance === "number") idleTalkChance = Math.max(0, Math.min(1, j.idleTalkChance));
+            if (typeof j.reminders === "boolean") reminders = j.reminders;
+            if (typeof j.reminderMinutes === "number") reminderMinutes = Math.max(1, Math.min(1440, Math.round(j.reminderMinutes)));
+            if (typeof j.humming === "boolean") humming = j.humming;
             if (typeof j.volume === "number") volume = Math.max(0, Math.min(1, j.volume));
             if (typeof j.model === "string" && j.model.length > 0) model = j.model;
             if (Array.isArray(j.models)) {
@@ -501,13 +586,84 @@ ShellRoot {
             running: win.idleTalk; repeat: true
             interval: win.idleInterval
             onTriggered: {
-                if (!win.dragging && Math.random() < win.idleTalkChance && !win.bubbleVisible)
+                if (!win.dragging && Math.random() < win.idleTalkChance && (!win.bubbleVisible || win.lyricVisible))
                     win.showBubble(win.randomLines());
                 win.idleInterval = win.idleTalkMinutes * 60000 * (0.5 + Math.random());
             }
         }
 
         Timer { id: bubbleCloseTimer; interval: 5000; onTriggered: win.closeBubble() }
+        Timer {
+            interval: win.reminderMinutes * 60000
+            running: win.reminders
+            repeat: true
+            onTriggered: if (!win.dragging && (!win.bubbleVisible || win.lyricVisible))
+                win.showBubble([{ t: win.pickOne(["休息一下吧，起来活动活动~", "喝点水，眼睛也休息一下哦~", "坐久啦，伸个懒腰吧！"]), s: "A", c: "" }])
+        }
+        function fetchLyrics() {
+            if (!win.humming || !win.lyricTrackKey || lyricsProc.running || win.lyricRequestKey === win.lyricTrackKey) return;
+            win.lyricRequestKey = win.lyricTrackKey;
+            lyricsProc.command = ["python3", win.assetDir + "../tools/current-lyric.py", win.lyricArtist, win.lyricPlayer.trackTitle];
+            lyricsProc.running = true;
+        }
+        onLyricTrackKeyChanged: {
+            win.lyricLines = [];
+            win.plainLyricLines = [];
+            if (win.lyricVisible) win.closeBubble();
+            if (!lyricsProc.running) win.lyricRequestKey = "";
+            win.fetchLyrics();
+        }
+        Timer {
+            interval: 1000
+            running: win.humming && win.lyricPlayer !== null && (win.lyricLines.length > 0 || win.plainLyricLines.length > 0)
+            repeat: true
+            onTriggered: {
+                if (win.dragging || (win.bubbleVisible && !win.lyricVisible)) return;
+                const position = win.lyricPlayer.position;
+                let line = "";
+                for (const entry of win.lyricLines) {
+                    if (entry.time <= position) line = entry.text;
+                    else break;
+                }
+                if (win.lyricLines.length === 0 && win.plainLyricLines.length > 0)
+                    line = win.plainLyricLines[Math.floor(position / 8) % win.plainLyricLines.length];
+                if (!line) { if (win.lyricVisible) win.closeBubble(); return; }
+                const shown = "♪ " + line.slice(0, 100) + " ♪";
+                if (!win.lyricVisible || win.bubbleLines.length === 0 || win.bubbleLines[0].t !== shown)
+                    win.bubbleLines = [{ t: shown, s: "A", c: "" }];
+                win.lyricVisible = true;
+                win.bubbleGif = false;
+                win.bubbleVisible = true;
+                bubbleCloseTimer.stop();
+            }
+        }
+        Process {
+            id: lyricsProc
+            stdout: StdioCollector {
+                onStreamFinished: {
+                    if (win.lyricRequestKey !== win.lyricTrackKey) return;
+                    try {
+                        const data = JSON.parse(text);
+                        const entries = [];
+                        for (const line of (data.syncedLyrics || "").split("\n")) {
+                            const m = line.match(/^\[(\d+):(\d+(?:\.\d+)?)\]\s*(.*?)\s*$/);
+                            if (m && m[3]) entries.push({ time: Number(m[1]) * 60 + Number(m[2]), text: m[3] });
+                        }
+                        entries.sort((a, b) => a.time - b.time);
+                        win.lyricLines = entries;
+                        win.plainLyricLines = (data.plainLyrics || "").split("\n").map(s => s.trim()).filter(s => s.length > 0);
+                    } catch (e) {
+                        win.lyricLines = [];
+                        win.plainLyricLines = [];
+                    }
+                }
+            }
+            onExited: if (win.lyricRequestKey !== win.lyricTrackKey) win.fetchLyrics()
+        }
+        onHummingChanged: {
+            if (!humming && lyricVisible) closeBubble();
+            if (humming) { lyricRequestKey = ""; fetchLyrics(); }
+        }
 
         // ---------- 多家余额轮询 ----------
         function startBalanceCycle() {
@@ -675,6 +831,9 @@ ShellRoot {
             width: win.whaleW
             height: win.whaleH
             fillMode: Image.PreserveAspectFit
+            transformOrigin: Item.Bottom
+            rotation: win.headWiggle + (win.dragging && win.moved ? (win.mirrored ? -7 : 7) : 0)
+            Behavior on rotation { enabled: !headWiggleAnim.running; NumberAnimation { duration: 150 } }
             // 源图已按显示尺寸预缩放,关闭 mipmap 保持锐利;缺预缩放图时仍可回退原图
             mipmap: false
             onStatusChanged: {
@@ -694,6 +853,25 @@ ShellRoot {
             y: win.height - win.whaleH - 6
             width: win.whaleW + 12
             height: win.whaleH + 6
+
+            Text {
+                visible: win.dragging && win.moved
+                x: parent.width * 0.72
+                y: -height * 0.3
+                text: "!"
+                color: "#ed8b43"
+                font.bold: true
+                font.pixelSize: Math.max(18, Math.round(win.whaleW * 0.22))
+                style: Text.Outline
+                styleColor: "white"
+            }
+            SequentialAnimation {
+                id: headWiggleAnim
+                NumberAnimation { target: win; property: "headWiggle"; to: -8; duration: 90 }
+                NumberAnimation { target: win; property: "headWiggle"; to: 8; duration: 140 }
+                NumberAnimation { target: win; property: "headWiggle"; to: -4; duration: 120 }
+                NumberAnimation { target: win; property: "headWiggle"; to: 0; duration: 120 }
+            }
 
             // 按压 Q 弹(底部坐标不变)
             SequentialAnimation {
@@ -719,20 +897,39 @@ ShellRoot {
                 acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
                 property real lastX: 0
                 property real pressX: 0
+                property bool headHover: false
+                property bool suppressRelease: false
+                property bool pressedHead: false
+
+                onExited: { headHover = false; headPatTimer.stop(); }
 
                 onPressed: (mouse) => {
+                    headPatTimer.stop();
                     lastX = mouse.x; pressX = mouse.x;
+                    pressedHead = mouse.button === Qt.LeftButton && mouse.y < height * 0.45;
                     win.moved = false;
                     if (!win.dragging) { win.dragging = true; squishAnim.restart(); win.playPress(); }
                 }
                 onPositionChanged: (mouse) => {
-                    if (!pressed) return;
+                    if (!pressed) {
+                        const overHead = mouse.y < height * 0.35;
+                        if (overHead && !headHover && !headPatCooldown.running) headPatTimer.restart();
+                        if (!overHead) headPatTimer.stop();
+                        headHover = overHead;
+                        return;
+                    }
                     const dx = mouse.x - lastX;
                     lastX = mouse.x;
                     if (!win.moved && Math.abs(mouse.x - pressX) > 4) win.moved = true;
                     if (win.moved) win.petX = win.clampX(win.petX + dx);
                 }
                 onReleased: (mouse) => whaleArea.finishDrag(mouse.button)
+                onDoubleClicked: (mouse) => {
+                    if (mouse.button === Qt.LeftButton) {
+                        suppressRelease = true;
+                        win.showCharacterReaction("double");
+                    }
+                }
                 // 拖到屏幕边缘时指针会冲出窗口,Wayland 取消抓取走这里而不是 onReleased
                 onCanceled: whaleArea.finishDrag(Qt.LeftButton)
 
@@ -749,19 +946,34 @@ ShellRoot {
                         if (side !== 0) win.snapTo(side);
                         else { win.mirrored = false; win.snapRight = false; }
                         saveState.save();
+                        win.showCharacterReaction("drag");
+                    } else if (whaleArea.suppressRelease) {
+                        whaleArea.suppressRelease = false;
                     } else if (button === Qt.MiddleButton) {
-                        // 中键:循环换装
-                        win.cycleModel();
+                        if (win.menuVisible) win.closeBubble();
+                        else win.showMenu();
                     } else if (button === Qt.RightButton) {
-                        // 右键:峰谷 + 余额;有气泡先关
                         if (win.bubbleVisible) win.closeBubble();
                         else win.showBubble(win.group1());
+                    } else if (whaleArea.pressedHead) {
+                        win.showCharacterReaction("head");
                     } else {
                         win.showBubble(win.randomLines());
                     }
                     win.dragging = false;
                 }
             }
+            Timer {
+                id: headPatTimer
+                interval: 1200
+                onTriggered: {
+                    if (whaleArea.headHover && !whaleArea.pressed && (!win.bubbleVisible || win.lyricVisible) && !win.dragging) {
+                        win.showCharacterReaction("head");
+                        headPatCooldown.restart();
+                    }
+                }
+            }
+            Timer { id: headPatCooldown; interval: 15000 }
         }
 
         // ---------- 气泡(复刻上游 SVG 模板: 白色 + #203170 粗描边) ----------
@@ -832,11 +1044,12 @@ ShellRoot {
             MouseArea {
                 anchors.fill: parent
                 cursorShape: Qt.PointingHandCursor
+                enabled: !win.menuVisible
                 onClicked: win.showBubble(win.randomLines())
             }
 
             AnimatedImage {
-                visible: win.bubbleGif
+                visible: win.bubbleGif && !win.menuVisible
                 source: "assets/rua.gif"
                 anchors.centerIn: parent
                 anchors.verticalCenterOffset: -bubbleBox.artH * 0.18
@@ -847,7 +1060,7 @@ ShellRoot {
 
             Column {
                 id: bubbleCol
-                visible: !win.bubbleGif
+                visible: !win.bubbleGif && !win.menuVisible
                 x: bubbleBox.width / 2 - width / 2
                 y: bubbleBox.artScale * 247 - height / 2
                 width: bubbleBox.artScale * 677
@@ -866,6 +1079,42 @@ ShellRoot {
                         font.weight: Font.Bold
                         // 跟随窗口宽度缩放:默认配置(宽 229)下为 19px
                         font.pixelSize: Math.max(9, Math.round(19 * win.width / 229))
+                    }
+                }
+            }
+            Column {
+                visible: win.menuVisible
+                width: bubbleBox.artScale * 677
+                x: (bubbleBox.width - width) / 2
+                y: bubbleBox.artScale * 247 - height / 2
+                Repeater {
+                    model: [
+                        { label: "查看余额", action: "balance" },
+                        { label: "切换模型", action: "model" },
+                        { label: "缩小 / 放大", action: "size" },
+                        { label: "音效：" + (win.soundOn ? "开" : "关"), action: "sound" },
+                        { label: "休息提醒：" + (win.reminders ? "开" : "关"), action: "reminders" },
+                        { label: "哼唱：" + (win.humming ? "开" : "关"), action: "humming" }
+                    ]
+                    Item {
+                        required property var modelData
+                        width: parent.width
+                        height: Math.max(18, Math.round(22 * win.width / 229))
+                        Text {
+                            anchors.centerIn: parent
+                            width: parent.width
+                            horizontalAlignment: Text.AlignHCenter
+                            elide: Text.ElideRight
+                            text: modelData.label
+                            color: win.bubbleText
+                            font.pixelSize: Math.max(10, Math.round(15 * win.width / 229))
+                            font.bold: true
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: (mouse) => win.menuAction(modelData.action === "size" ? (mouse.x < width / 2 ? "smaller" : "larger") : modelData.action)
+                        }
                     }
                 }
             }
