@@ -28,6 +28,8 @@ ShellRoot {
         property bool reminders: false       // 定时休息提醒,默认不打扰
         property int reminderMinutes: 60
         property bool humming: true          // 持续显示当前歌曲歌词
+        property bool showTray: true         // 托盘入口（需要 dsh-pet-tray）
+        property bool petShown: true
         property real idleInterval: 300000   // 下一次自言自语的实际间隔(随机化后)
         property real volume: 1.0            // 音效音量 0 – 1
         property string model: "DSniang1.png" // 角色立绘(assets 下文件名,或绝对路径)
@@ -69,7 +71,7 @@ ShellRoot {
         onScreenDprChanged: win.modelFallback = false
 
         color: "transparent"
-        visible: win.bootReady                       // 配置+位置就绪后才出现,首帧即正确大小
+        visible: win.bootReady && win.petShown       // 配置+位置就绪后才出现,首帧即正确大小
         anchors { bottom: true; left: true }
         exclusionMode: ExclusionMode.Ignore
         WlrLayershell.layer: WlrLayer.Top
@@ -148,12 +150,14 @@ ShellRoot {
         }
 
         // ---------- 台词 ----------
-        function isPeak() {
-            const d = new Date();
-            if (d.getDay() === 0 || d.getDay() === 6) return false; // 周末全天谷价
-            const h = d.getHours();
+        // DeepSeek 按北京时间计费；法定节假日全天谷价，需以官方公告核对。
+        function isPeakAt(timestamp) {
+            const d = new Date(timestamp + 8 * 60 * 60 * 1000);
+            if (d.getUTCDay() === 0 || d.getUTCDay() === 6) return false;
+            const h = d.getUTCHours();
             return (h >= 9 && h < 12) || (h >= 14 && h < 18);
         }
+        function isPeak() { return win.isPeakAt(Date.now()); }
         function pickOne(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
         // 未内置专属文案的自定义模型沿用小鲸鱼的互动台词。
@@ -193,18 +197,35 @@ ShellRoot {
 
         function group1() {
             const peak = win.isPeak();
-            const lines = [{ t: (peak ? "梁文峰" : "梁文谷") + "(DeepSeek)", s: "P", c: peak ? "#e0433f" : "#2fa24c" }];
-            let any = false, anyErr = false;
+            const lines = [{ t: peak ? "梁文锋*" : "梁文谷", s: "P", c: peak ? "#e0433f" : "#2fa24c" }];
+            let firstBalance = null;
+            let anyError = false;
             for (const r of win.balanceResults) {
-                if (r.ok) { lines.push({ t: r.name + " " + r.amount + "\u00A0" + r.currency, s: "B", c: "" }); any = true; }
+                if (r.ok) {
+                    lines.push({ t: r.name + " " + r.amount + "\u00A0" + r.currency, s: "B", c: "" });
+                    if (!firstBalance) firstBalance = r;
+                }
                 else {
-                    if (r.err) anyErr = true;
+                    if (r.err) anyError = true;
                     lines.push({ t: r.name + " " + (r.err ? r.amount : "--"), s: "A", c: win.bubbleMuted });
                 }
             }
-            if (!any && !anyErr) {
-                return [{ t: pickOne(["鲸鱼娘上岗啦~", "今天也要加油鸭！不对，加油鲸！", "余额？我看看...看不了啦，没给我钥匙~", "在 config.json 的 balance 里填 key,我就能报余额啦~"]), s: "A", c: "" }];
+            const tips = peak
+                ? ["高峰时段，悠着点用~", "梁文锋上班啦，省着点花~", "高峰来了，精打细算哦~"]
+                : ["谷价时段，安心畅聊~", "梁文谷来啦，聊天更划算~", "谷价到啦，灵感随便聊~"];
+            if (firstBalance) {
+                const amount = Number(firstBalance.amount);
+                const limit = firstBalance.currency === "CNY" ? 5 : firstBalance.currency === "USD" ? 1 : null;
+                if (limit !== null && Number.isFinite(amount) && amount < limit)
+                    tips.push("钱包快空啦，记得看看~", "余额不多了，注意补充哦~");
+                else if (limit !== null && Number.isFinite(amount))
+                    tips.push("钱包还有余粮，安心提问~", "余额还在，继续加油鸭~");
+            } else if (anyError) {
+                tips.push("余额暂时看不了，稍后再试~");
+            } else {
+                tips.push("没给我钥匙，看不到余额~", "配置好钥匙，我就能报余额~");
             }
+            lines.push({ t: win.pickOne(tips), s: "A", c: "" });
             return lines;
         }
 
@@ -238,7 +259,7 @@ ShellRoot {
             if (Math.random() < 0.3)
                 return [{ t: win.characterLine("idle"), s: "A", c: "" }];
             const groups = [
-                { w: 18, f: group1 },   // 峰谷 + 余额
+                { w: 200, f: group1 },  // 峰谷 + 余额，优先出现
                 { w: 6,  f: () => [{ t: pickOne(["好模型... ↓", "好女孩...↓"]), s: "B", c: "" }] },
                 { w: 9,  f: () => [{ t: pickOne([
                     "不知道用户有什么用，先赶走吧~",
@@ -508,6 +529,7 @@ ShellRoot {
             if (typeof j.reminders === "boolean") reminders = j.reminders;
             if (typeof j.reminderMinutes === "number") reminderMinutes = Math.max(1, Math.min(1440, Math.round(j.reminderMinutes)));
             if (typeof j.humming === "boolean") humming = j.humming;
+            if (typeof j.showTray === "boolean") showTray = j.showTray;
             if (typeof j.volume === "number") volume = Math.max(0, Math.min(1, j.volume));
             if (typeof j.model === "string" && j.model.length > 0) model = j.model;
             if (Array.isArray(j.models)) {
@@ -817,9 +839,18 @@ ShellRoot {
             target: "dsh-pet"
             function getModel(): string { return win.model; }
             function setModel(name: string): string { return win.switchModel(name); }
-            function nextModel(): string { return win.cycleModel(); }
+            function nextModel(): string { const model = win.cycleModel(); win.saveSetting("model", model); return model; }
             function listModels(): string { return win.modelChoices.join("\n"); }
             function say(text: string): void { win.showBubble([{ t: text, s: "A", c: "" }]); }
+            function getVisible(): bool { return win.petShown; }
+            function toggleVisible(): void { win.petShown = !win.petShown; }
+            function quit(): void { Qt.quit(); }
+        }
+        Process {
+            id: trayProc
+            command: ["sh", "-c", 'command -v dsh-pet-tray >/dev/null && exec dsh-pet-tray "$1" "$2"',
+                      "sh", win.assetDir + "..", win.assetDir + "DSniang1.png"]
+            running: win.bootReady && win.showTray
         }
 
         // ---------- 鲸鱼本体 ----------
@@ -853,6 +884,7 @@ ShellRoot {
             y: win.height - win.whaleH - 6
             width: win.whaleW + 12
             height: win.whaleH + 6
+
 
             Text {
                 visible: win.dragging && win.moved
@@ -953,7 +985,7 @@ ShellRoot {
                         if (win.menuVisible) win.closeBubble();
                         else win.showMenu();
                     } else if (button === Qt.RightButton) {
-                        if (win.bubbleVisible) win.closeBubble();
+                        if (win.bubbleVisible && !win.lyricVisible) win.closeBubble();
                         else win.showBubble(win.group1());
                     } else if (whaleArea.pressedHead) {
                         win.showCharacterReaction("head");
@@ -1064,7 +1096,7 @@ ShellRoot {
                 x: bubbleBox.width / 2 - width / 2
                 y: bubbleBox.artScale * 247 - height / 2
                 width: bubbleBox.artScale * 677
-                spacing: 6
+                spacing: 2
 
                 Repeater {
                     model: win.bubbleGif ? [] : win.bubbleLines
@@ -1078,7 +1110,8 @@ ShellRoot {
                         font.family: "LXGW WenKai"
                         font.weight: Font.Bold
                         // 跟随窗口宽度缩放:默认配置(宽 229)下为 19px
-                        font.pixelSize: Math.max(9, Math.round(19 * win.width / 229))
+                        font.pixelSize: Math.max(9, Math.min(Math.round(19 * win.width / 229),
+                            Math.floor(bubbleBox.artH * 0.52 / Math.max(1, win.bubbleLines.length + 1))))
                     }
                 }
             }

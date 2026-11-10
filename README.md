@@ -79,7 +79,11 @@ Linux 版可在气泡持续显示当前播放歌曲的歌词（没有歌声音�
 此功能需要支持 MPRIS 的播放器，会将歌曲名和歌手
 发送到 LRCLIB 查询歌词；查不到时会再发送到网易云音乐。歌词缓存在
 `~/.cache/dsh-pet/`；查不到时不显示。
-| 托盘菜单(Windows) | 换模型、音效、自言自语、打开配置、退出 |
+
+Linux 右键查看余额时会在气泡中显示 DeepSeek 峰谷：北京时间周一至周五 9:00–12:00、
+14:00–18:00 为峰时，其余为谷时。**中国法定节假日全天谷时**；当前不自动查询
+节假日，峰时标记带 `*`，假期请以 [DeepSeek 官方价格说明](https://api-docs.deepseek.com/zh-cn/quick_start/pricing)为准。
+| 托盘菜单 | Linux(Nix 包):显示 / 隐藏、切换模型、退出；Windows:换模型、音效、自言自语、打开配置、退出 |
 
 ## 换模型
 
@@ -145,6 +149,7 @@ Windows 版改 `models` 数组后重启或托盘「重新读取配置」)。
   "reminders": false,       // Linux:定时休息提醒,默认关闭
   "reminderMinutes": 60,   // Linux:提醒间隔(分钟,1 – 1440)
   "humming": true,          // Linux:持续显示当前歌曲歌词
+  "showTray": true,         // Linux:启用托盘（需 dsh-pet-tray）
   "screen": "DP-2"          // Linux:输出名(niri msg outputs);Windows:显示器序号或名称;留空 = 主屏
 }
 ```
